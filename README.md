@@ -4,8 +4,8 @@ OKX AI PRO est un assistant local d'aide à la décision pour les contrats
 Futures `USDT-SWAP` d'OKX. Il est conçu pour fonctionner en continu, expliquer
 chaque signal et ne jamais ouvrir de position automatiquement.
 
-> État du projet : **phase 1 terminée — socle applicatif uniquement**. Aucun
-> appel à OKX, signal de trading ou ordre n'est implémenté à ce stade.
+> État du projet : **phase 1 validée ; phase 2 en développement**. Aucun signal,
+> stratégie ou ordre n'est implémenté.
 
 ## Principes
 
@@ -16,45 +16,48 @@ chaque signal et ne jamais ouvrir de position automatiquement.
 - configuration explicite, logs rotatifs et erreurs contrôlées ;
 - compatibilité ciblée : Python 3.13, Windows, Linux et Termux.
 
-Le paquet reste compatible avec Python 3.11 et 3.12 pour faciliter le
-développement, tandis que l'analyse statique et l'intégration continue ciblent
-explicitement Python 3.13.
+Le projet utilise `uv` pour verrouiller et synchroniser ses dépendances.
+L'analyse statique et l'intégration continue ciblent Python 3.13.
 
 ## Installation
 
-Cloner le dépôt, puis créer un environnement virtuel.
+Installer [`uv`](https://docs.astral.sh/uv/), cloner le dépôt puis synchroniser
+l'environnement verrouillé.
 
 ### Linux
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync --locked
+uv run python main.py
 ```
 
 ### Windows PowerShell
 
 ```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv sync --locked
+uv run python main.py
 ```
 
 ### Termux
 
 ```bash
 pkg update
-pkg install python git
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+pkg install python git uv
+uv sync --locked
+uv run python main.py
 ```
 
-Le socle n'a aucune dépendance d'exécution externe. Les outils installés par
-`requirements-dev.txt` servent aux tests et aux contrôles de qualité.
+Après activation de l'environnement (`source .venv/bin/activate` sous
+Linux/Termux), le démarrage direct demandé est également disponible :
+
+```bash
+python main.py
+```
+
+`requirements*.txt` reste fourni comme export de compatibilité ; `uv.lock` est
+la source reproductible utilisée par le projet.
 
 ## Configuration
 
@@ -63,7 +66,8 @@ prioritaire :
 
 1. `src/okx_ai_pro/default.toml` ;
 2. fichier TOML fourni avec `--config` ;
-3. variables d'environnement `OKX_AI_PRO_*`.
+3. variables d'environnement `OKX_AI_PRO_*`, validées par
+   `pydantic-settings`.
 
 Copier `config.example.toml` vers `config.local.toml` pour créer une
 configuration locale. Ce dernier est ignoré par Git.
@@ -74,7 +78,9 @@ okx-ai-pro --config config.local.toml
 python -m okx_ai_pro --config config.local.toml
 ```
 
-Variables reconnues :
+Les variables imbriquées utilisent `__`, par exemple
+`OKX_AI_PRO_OKX__REQUEST_TIMEOUT_SECONDS=5`. Les alias historiques suivants
+restent reconnus :
 
 | Variable | Usage |
 |---|---|
@@ -86,16 +92,17 @@ Variables reconnues :
 | `OKX_AI_PRO_LOG_FILE_ENABLED` | Active les logs fichier |
 | `OKX_AI_PRO_LOG_DIRECTORY` | Répertoire des logs |
 
-Les booléens acceptent `true/false`, `yes/no`, `on/off` et `1/0`. Aucun secret
-OKX n'est défini pendant cette phase.
+Les booléens acceptent `true/false`, `yes/no`, `on/off` et `1/0`. Les URL,
+timeouts, politiques de retry, reconnexion et limites OKX sont centralisés dans
+le TOML. Aucun secret OKX n'est nécessaire pour les données publiques.
 
 ## Qualité et tests
 
 ```bash
-ruff check .
-ruff format --check .
-mypy
-pytest --cov=okx_ai_pro --cov-report=term-missing
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy
+uv run pytest --cov=okx_ai_pro --cov-report=term-missing
 ```
 
 La couverture minimale est fixée à 90 %. La CI exécute ces contrôles sous

@@ -21,14 +21,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
-dependencies = []
-
-[project.optional-dependencies]
-dev = [
-    "mypy>=1.17,<2",
-    "pytest>=8.4,<10",
-    "pytest-cov>=6.2,<8",
-    "ruff>=0.12,<1",
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.14.2",
+    "websockets>=17.0.1",
 ]
 
 [project.scripts]
@@ -87,3 +83,12 @@ python_version = "3.13"
 strict = true
 files = ["src", "tests"]
 warn_unreachable = true
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.1",
+]

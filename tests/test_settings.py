@@ -21,6 +21,8 @@ def test_loads_packaged_defaults_without_creating_directories(tmp_path: Path) ->
     assert settings.app.data_directory == tmp_path / "data"
     assert settings.logging.level == "INFO"
     assert settings.logging.file_path == tmp_path / "logs" / "okx-ai-pro.log"
+    assert str(settings.okx.rest_base_url) == "https://openapi.okx.com/"
+    assert settings.okx.rate_limits["candles"].max_requests == 40
     assert not settings.app.data_directory.exists()
     assert not settings.logging.directory.exists()
 
@@ -82,7 +84,7 @@ file_enabled = false
         ("[app]\nenvironment = 'invalid'", "app.environment"),
         ("[logging]\nlevel = 'TRACE'", "logging.level"),
         ("[logging]\nmax_bytes = 0", "max_bytes"),
-        ("[logging]\nconsole_enabled = 'yes'", "console_enabled"),
+        ("[logging]\nconsole_enabled = 'sometimes'", "console_enabled"),
         ("[logging]\nfilename = '../outside.log'", "simple nom de fichier"),
     ],
 )
@@ -96,7 +98,7 @@ def test_rejects_invalid_configuration(tmp_path: Path, content: str, message: st
 def test_rejects_unknown_nested_key(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path / "invalid.toml", "[app]\ntypo = true")
 
-    with pytest.raises(ConfigurationError, match="section app"):
+    with pytest.raises(ConfigurationError, match="app.typo"):
         load_settings(config_path, environ={}, base_directory=tmp_path)
 
 
@@ -106,6 +108,19 @@ def test_rejects_invalid_boolean_environment_value(tmp_path: Path) -> None:
             environ={"OKX_AI_PRO_LOG_FILE_ENABLED": "sometimes"},
             base_directory=tmp_path,
         )
+
+
+def test_supports_nested_pydantic_environment_variables(tmp_path: Path) -> None:
+    settings = load_settings(
+        environ={
+            "OKX_AI_PRO_OKX__REQUEST_TIMEOUT_SECONDS": "3.5",
+            "OKX_AI_PRO_OKX__RETRY__MAX_ATTEMPTS": "7",
+        },
+        base_directory=tmp_path,
+    )
+
+    assert settings.okx.request_timeout_seconds == 3.5
+    assert settings.okx.retry.max_attempts == 7
 
 
 def test_rejects_missing_and_malformed_files(tmp_path: Path) -> None:

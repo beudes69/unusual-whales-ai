@@ -5,7 +5,7 @@
 Cette phase fournit uniquement l'infrastructure commune :
 
 - paquet Python installable selon une disposition `src/` ;
-- configuration immuable, typée et validée ;
+- configuration immuable, typée et validée par `pydantic-settings` ;
 - surcharge TOML puis variables d'environnement ;
 - chemins portables avec `pathlib` ;
 - journalisation UTF-8, UTC et rotation locale ;
@@ -42,8 +42,8 @@ autres analyses.
 
 ## Configuration
 
-`Settings` est un agrégat immuable. Le chargement suit une priorité
-déterministe :
+`Settings` est un agrégat `BaseSettings` immuable. Le chargement suit une
+priorité déterministe :
 
 ```text
 valeurs intégrées < fichier TOML utilisateur < environnement

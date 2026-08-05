@@ -1,4 +1,4 @@
-"""Chargement et validation centralisés de la configuration."""
+"""Chargement et validation centralisés avec pydantic-settings."""
 
 from __future__ import annotations
 
@@ -6,28 +6,40 @@ import os
 import tomllib
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
-from typing import Final
+from typing import Annotated, Final
+
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    WebsocketUrl,
+    field_validator,
+)
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from okx_ai_pro.exceptions import ConfigurationError
 
-_ROOT_KEYS: Final = frozenset({"app", "logging"})
-_APP_KEYS: Final = frozenset({"environment", "timezone", "data_directory"})
-_LOGGING_KEYS: Final = frozenset(
-    {
-        "level",
-        "console_enabled",
-        "file_enabled",
-        "directory",
-        "filename",
-        "max_bytes",
-        "backup_count",
-    }
-)
+PositiveFloat = Annotated[float, Field(gt=0)]
+PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeFloat = Annotated[float, Field(ge=0)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
+
+_ENV_PREFIX: Final = "OKX_AI_PRO_"
 _LOG_LEVELS: Final = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+_LEGACY_ENV_PATHS: Final[dict[str, tuple[str, ...]]] = {
+    "ENVIRONMENT": ("app", "environment"),
+    "TIMEZONE": ("app", "timezone"),
+    "DATA_DIRECTORY": ("app", "data_directory"),
+    "LOG_LEVEL": ("logging", "level"),
+    "LOG_CONSOLE_ENABLED": ("logging", "console_enabled"),
+    "LOG_FILE_ENABLED": ("logging", "file_enabled"),
+    "LOG_DIRECTORY": ("logging", "directory"),
+}
 
 
 class Environment(StrEnum):
@@ -38,26 +50,46 @@ class Environment(StrEnum):
     PRODUCTION = "production"
 
 
-@dataclass(frozen=True, slots=True)
-class AppSettings:
+class _FrozenModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class AppSettings(_FrozenModel):
     """Paramètres généraux de l'application."""
 
     environment: Environment
-    timezone: str
+    timezone: str = Field(min_length=1)
     data_directory: Path
 
 
-@dataclass(frozen=True, slots=True)
-class LoggingSettings:
+class LoggingSettings(_FrozenModel):
     """Paramètres du système de journalisation."""
 
     level: str
     console_enabled: bool
     file_enabled: bool
     directory: Path
-    filename: str
-    max_bytes: int
-    backup_count: int
+    filename: str = Field(min_length=1)
+    max_bytes: PositiveInt
+    backup_count: NonNegativeInt
+
+    @field_validator("level")
+    @classmethod
+    def validate_level(cls, value: str) -> str:
+        """Normalise et contrôle le niveau de journalisation."""
+        normalized = value.upper()
+        if normalized not in _LOG_LEVELS:
+            accepted = ", ".join(sorted(_LOG_LEVELS))
+            raise ValueError(f"niveau invalide, valeurs acceptées : {accepted}")
+        return normalized
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        """Empêche qu'un nom de journal sorte de son répertoire."""
+        if Path(value).name != value:
+            raise ValueError("doit être un simple nom de fichier")
+        return value
 
     @property
     def file_path(self) -> Path:
@@ -65,12 +97,56 @@ class LoggingSettings:
         return self.directory / self.filename
 
 
-@dataclass(frozen=True, slots=True)
-class Settings:
-    """Configuration validée et immuable d'OKX AI PRO."""
+class RateLimitSettings(_FrozenModel):
+    """Quota d'un groupe d'appels sur une fenêtre glissante."""
+
+    max_requests: PositiveInt
+    period_seconds: PositiveFloat
+
+
+class RetrySettings(_FrozenModel):
+    """Politique de nouvelles tentatives REST."""
+
+    max_attempts: PositiveInt
+    initial_delay_seconds: NonNegativeFloat
+    maximum_delay_seconds: PositiveFloat
+    multiplier: Annotated[float, Field(ge=1)]
+    jitter_seconds: NonNegativeFloat
+
+
+class ReconnectSettings(_FrozenModel):
+    """Politique de reconnexion WebSocket."""
+
+    initial_delay_seconds: NonNegativeFloat
+    maximum_delay_seconds: PositiveFloat
+    multiplier: Annotated[float, Field(ge=1)]
+
+
+class OkxSettings(_FrozenModel):
+    """Paramètres réseau publics d'OKX."""
+
+    rest_base_url: AnyHttpUrl
+    websocket_public_url: WebsocketUrl
+    user_agent: str = Field(min_length=1)
+    request_timeout_seconds: PositiveFloat
+    websocket_open_timeout_seconds: PositiveFloat
+    websocket_close_timeout_seconds: PositiveFloat
+    websocket_receive_timeout_seconds: PositiveFloat
+    websocket_heartbeat_timeout_seconds: PositiveFloat
+    subscription_limit: RateLimitSettings
+    retry: RetrySettings
+    reconnect: ReconnectSettings
+    rate_limits: dict[str, RateLimitSettings]
+
+
+class Settings(BaseSettings):
+    """Configuration pydantic-settings validée et immuable."""
+
+    model_config = SettingsConfigDict(extra="forbid", frozen=True)
 
     app: AppSettings
     logging: LoggingSettings
+    okx: OkxSettings
 
     def prepare_runtime_directories(self) -> None:
         """Crée uniquement les répertoires nécessaires à l'exécution."""
@@ -85,12 +161,7 @@ def load_settings(
     environ: Mapping[str, str] | None = None,
     base_directory: str | Path | None = None,
 ) -> Settings:
-    """Charge les valeurs par défaut, un fichier utilisateur puis l'environnement.
-
-    Les chemins relatifs sont résolus depuis ``base_directory`` ou, par défaut,
-    depuis le répertoire de travail. Le chargement n'a aucun effet de bord sur
-    le système de fichiers.
-    """
+    """Fusionne TOML et environnement, puis valide via pydantic-settings."""
     raw_config = _load_default_config()
 
     if config_path is not None:
@@ -101,7 +172,11 @@ def load_settings(
 
     _apply_environment(raw_config, os.environ if environ is None else environ)
     base_path = Path.cwd() if base_directory is None else Path(base_directory).expanduser()
-    return _build_settings(raw_config, base_path.resolve())
+    _resolve_runtime_paths(raw_config, base_path.resolve())
+    try:
+        return Settings.model_validate(raw_config)
+    except ValidationError as exc:
+        raise ConfigurationError(f"Configuration invalide : {exc}") from exc
 
 
 def _load_default_config() -> dict[str, object]:
@@ -130,125 +205,38 @@ def _deep_merge(target: dict[str, object], override: Mapping[str, object]) -> No
 
 
 def _apply_environment(config: dict[str, object], environ: Mapping[str, str]) -> None:
-    app = _expect_table(config, "app")
-    logging_config = _expect_table(config, "logging")
-
-    text_overrides = {
-        "OKX_AI_PRO_ENVIRONMENT": (app, "environment"),
-        "OKX_AI_PRO_TIMEZONE": (app, "timezone"),
-        "OKX_AI_PRO_DATA_DIRECTORY": (app, "data_directory"),
-        "OKX_AI_PRO_LOG_LEVEL": (logging_config, "level"),
-        "OKX_AI_PRO_LOG_DIRECTORY": (logging_config, "directory"),
-    }
-    for variable, (section, key) in text_overrides.items():
-        if variable in environ:
-            section[key] = environ[variable]
-
-    boolean_overrides = {
-        "OKX_AI_PRO_LOG_CONSOLE_ENABLED": (logging_config, "console_enabled"),
-        "OKX_AI_PRO_LOG_FILE_ENABLED": (logging_config, "file_enabled"),
-    }
-    for variable, (section, key) in boolean_overrides.items():
-        if variable in environ:
-            section[key] = _parse_boolean(environ[variable], variable)
+    for variable, value in environ.items():
+        if not variable.startswith(_ENV_PREFIX):
+            continue
+        suffix = variable.removeprefix(_ENV_PREFIX)
+        path = _LEGACY_ENV_PATHS.get(suffix)
+        if path is None:
+            path = tuple(part.lower() for part in suffix.split("__"))
+        if len(path) < 2 or any(not part for part in path):
+            raise ConfigurationError(f"Variable d'environnement invalide : {variable}")
+        _set_nested(config, path, value)
 
 
-def _build_settings(config: Mapping[str, object], base_directory: Path) -> Settings:
-    _reject_unknown_keys(config, _ROOT_KEYS, "racine")
-    app = _expect_table(config, "app")
-    logging_config = _expect_table(config, "logging")
-    _reject_unknown_keys(app, _APP_KEYS, "app")
-    _reject_unknown_keys(logging_config, _LOGGING_KEYS, "logging")
-
-    environment_value = _expect_string(app, "environment").lower()
-    try:
-        environment = Environment(environment_value)
-    except ValueError as exc:
-        allowed = ", ".join(item.value for item in Environment)
-        raise ConfigurationError(
-            f"app.environment doit être l'une des valeurs suivantes : {allowed}"
-        ) from exc
-
-    timezone = _expect_string(app, "timezone")
-    level = _expect_string(logging_config, "level").upper()
-    if level not in _LOG_LEVELS:
-        accepted_levels = ", ".join(sorted(_LOG_LEVELS))
-        raise ConfigurationError(
-            f"logging.level invalide : {level}. Valeurs acceptées : {accepted_levels}"
-        )
-
-    filename = _expect_string(logging_config, "filename")
-    if Path(filename).name != filename:
-        raise ConfigurationError("logging.filename doit être un simple nom de fichier.")
-
-    max_bytes = _expect_integer(logging_config, "max_bytes", minimum=1)
-    backup_count = _expect_integer(logging_config, "backup_count", minimum=0)
-
-    return Settings(
-        app=AppSettings(
-            environment=environment,
-            timezone=timezone,
-            data_directory=_resolve_path(_expect_string(app, "data_directory"), base_directory),
-        ),
-        logging=LoggingSettings(
-            level=level,
-            console_enabled=_expect_boolean(logging_config, "console_enabled"),
-            file_enabled=_expect_boolean(logging_config, "file_enabled"),
-            directory=_resolve_path(_expect_string(logging_config, "directory"), base_directory),
-            filename=filename,
-            max_bytes=max_bytes,
-            backup_count=backup_count,
-        ),
-    )
+def _set_nested(config: dict[str, object], path: tuple[str, ...], value: str) -> None:
+    current = config
+    for key in path[:-1]:
+        child = current.get(key)
+        if not isinstance(child, dict):
+            child = {}
+            current[key] = child
+        current = child
+    current[path[-1]] = value
 
 
-def _expect_table(config: Mapping[str, object], key: str) -> dict[str, object]:
-    value = config.get(key)
-    if not isinstance(value, dict):
-        raise ConfigurationError(f"La section [{key}] est absente ou invalide.")
-    return value
-
-
-def _expect_string(config: Mapping[str, object], key: str) -> str:
-    value = config.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigurationError(f"{key} doit être une chaîne non vide.")
-    return value.strip()
-
-
-def _expect_boolean(config: Mapping[str, object], key: str) -> bool:
-    value = config.get(key)
-    if not isinstance(value, bool):
-        raise ConfigurationError(f"{key} doit être un booléen.")
-    return value
-
-
-def _expect_integer(config: Mapping[str, object], key: str, *, minimum: int) -> int:
-    value = config.get(key)
-    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-        raise ConfigurationError(f"{key} doit être un entier supérieur ou égal à {minimum}.")
-    return value
-
-
-def _parse_boolean(value: str, variable: str) -> bool:
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ConfigurationError(f"{variable} doit contenir true/false, yes/no, on/off ou 1/0.")
+def _resolve_runtime_paths(config: dict[str, object], base_directory: Path) -> None:
+    app = config.get("app")
+    logging_config = config.get("logging")
+    if isinstance(app, dict) and isinstance(app.get("data_directory"), str):
+        app["data_directory"] = _resolve_path(app["data_directory"], base_directory)
+    if isinstance(logging_config, dict) and isinstance(logging_config.get("directory"), str):
+        logging_config["directory"] = _resolve_path(logging_config["directory"], base_directory)
 
 
 def _resolve_path(value: str, base_directory: Path) -> Path:
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (base_directory / path).resolve()
-
-
-def _reject_unknown_keys(
-    config: Mapping[str, object], expected: frozenset[str], section: str
-) -> None:
-    unknown = set(config) - expected
-    if unknown:
-        raise ConfigurationError(
-            f"Clé(s) inconnue(s) dans la section {section} : {', '.join(sorted(unknown))}"
-        )

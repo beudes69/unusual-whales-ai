@@ -14,3 +14,9 @@ directory = "logs"
 filename = "okx-ai-pro.log"
 max_bytes = 10485760
 backup_count = 5
+
+[okx]
+rest_base_url = "https://openapi.okx.com"
+websocket_public_url = "wss://ws.okx.com:8443/ws/v5/public"
+request_timeout_seconds = 10.0
+websocket_receive_timeout_seconds = 25.0

@@ -11,3 +11,57 @@ directory = "logs"
 filename = "okx-ai-pro.log"
 max_bytes = 10485760
 backup_count = 5
+
+[okx]
+rest_base_url = "https://openapi.okx.com"
+websocket_public_url = "wss://ws.okx.com:8443/ws/v5/public"
+user_agent = "OKX-AI-PRO/0.2.0"
+request_timeout_seconds = 10.0
+websocket_open_timeout_seconds = 10.0
+websocket_close_timeout_seconds = 10.0
+websocket_receive_timeout_seconds = 25.0
+websocket_heartbeat_timeout_seconds = 5.0
+
+[okx.subscription_limit]
+max_requests = 480
+period_seconds = 3600.0
+
+[okx.retry]
+max_attempts = 3
+initial_delay_seconds = 0.5
+maximum_delay_seconds = 8.0
+multiplier = 2.0
+jitter_seconds = 0.1
+
+[okx.reconnect]
+initial_delay_seconds = 1.0
+maximum_delay_seconds = 30.0
+multiplier = 2.0
+
+[okx.rate_limits.instruments]
+max_requests = 20
+period_seconds = 2.0
+
+[okx.rate_limits.candles]
+max_requests = 40
+period_seconds = 2.0
+
+[okx.rate_limits.funding_rate]
+max_requests = 10
+period_seconds = 2.0
+
+[okx.rate_limits.open_interest]
+max_requests = 20
+period_seconds = 2.0
+
+[okx.rate_limits.order_book]
+max_requests = 40
+period_seconds = 2.0
+
+[okx.rate_limits.mark_price]
+max_requests = 10
+period_seconds = 2.0
+
+[okx.rate_limits.index_price]
+max_requests = 20
+period_seconds = 2.0
