@@ -38,6 +38,27 @@ class RetryManagerProtocol(Protocol):
         ...
 
 
+class ConnectionManagerProtocol(Protocol):
+    """Contrat remplaçable de l'état de connexion."""
+
+    @property
+    def is_connected(self) -> bool: ...
+
+    async def mark_connecting(self) -> None: ...
+
+    async def mark_connected(self) -> None: ...
+
+    async def mark_disconnected(self) -> None: ...
+
+    async def mark_stopping(self) -> None: ...
+
+    async def mark_stopped(self) -> None: ...
+
+    async def next_reconnect_delay(self) -> float: ...
+
+    async def wait_until_connected(self, timeout: float) -> None: ...
+
+
 class RestClientProtocol(Protocol):
     """Contrat des données publiques disponibles par REST."""
 
@@ -109,6 +130,7 @@ class WebSocketConnectorProtocol(Protocol):
         open_timeout: float,
         close_timeout: float,
         ping_interval: None,
+        user_agent_header: str,
     ) -> Awaitable[WebSocketConnectionProtocol]: ...
 
 

@@ -15,7 +15,15 @@ from okx_ai_pro.okx.exceptions import (
     OkxWebSocketClosedError,
     OkxWebSocketError,
 )
-from okx_ai_pro.okx.interfaces import MessageCallback, OkxClientProtocol
+from okx_ai_pro.okx.interfaces import (
+    ConnectionManagerProtocol,
+    MessageCallback,
+    OkxClientProtocol,
+    RateLimiterProtocol,
+    RestClientProtocol,
+    RetryManagerProtocol,
+    WebSocketClientProtocol,
+)
 from okx_ai_pro.okx.models import (
     Candle,
     CandleBar,
@@ -33,6 +41,7 @@ from okx_ai_pro.okx.models import (
 __all__ = [
     "Candle",
     "CandleBar",
+    "ConnectionManagerProtocol",
     "FundingRate",
     "IndexPrice",
     "Instrument",
@@ -55,6 +64,10 @@ __all__ = [
     "OpenInterest",
     "OrderBook",
     "OrderBookLevel",
+    "RateLimiterProtocol",
+    "RestClientProtocol",
+    "RetryManagerProtocol",
+    "WebSocketClientProtocol",
     "WebSocketMessage",
     "WebSocketSubscription",
 ]

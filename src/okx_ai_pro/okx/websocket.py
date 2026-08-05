@@ -25,6 +25,7 @@ from okx_ai_pro.okx.exceptions import (
     OkxWebSocketError,
 )
 from okx_ai_pro.okx.interfaces import (
+    ConnectionManagerProtocol,
     MessageCallback,
     RateLimiterProtocol,
     WebSocketConnectionProtocol,
@@ -43,6 +44,7 @@ async def default_websocket_connector(
     open_timeout: float,
     close_timeout: float,
     ping_interval: None,
+    user_agent_header: str,
 ) -> WebSocketConnectionProtocol:
     """Adapte la fabrique `websockets` à l'interface remplaçable du projet."""
     connection = await connect(
@@ -50,6 +52,7 @@ async def default_websocket_connector(
         open_timeout=open_timeout,
         close_timeout=close_timeout,
         ping_interval=ping_interval,
+        user_agent_header=user_agent_header,
     )
     return cast(WebSocketConnectionProtocol, connection)
 
@@ -62,7 +65,7 @@ class WebSocketClient:
         settings: OkxSettings,
         *,
         connector: WebSocketConnectorProtocol = default_websocket_connector,
-        connection_manager: ConnectionManager | None = None,
+        connection_manager: ConnectionManagerProtocol | None = None,
         subscription_limiter: RateLimiterProtocol | None = None,
         sleep: SleepCallable = asyncio.sleep,
     ) -> None:
@@ -168,6 +171,7 @@ class WebSocketClient:
                         open_timeout=self._settings.websocket_open_timeout_seconds,
                         close_timeout=self._settings.websocket_close_timeout_seconds,
                         ping_interval=None,
+                        user_agent_header=self._settings.user_agent,
                     )
                     self._connection = connection
                     await self._connection_manager.mark_connected()

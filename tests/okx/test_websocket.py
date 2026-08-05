@@ -75,6 +75,7 @@ class SequenceConnector:
         open_timeout: float,
         close_timeout: float,
         ping_interval: None,
+        user_agent_header: str,
     ) -> WebSocketConnectionProtocol:
         self.calls += 1
         self.called.set()
@@ -284,6 +285,7 @@ async def test_start_times_out_and_cancels_runner(
         open_timeout: float,
         close_timeout: float,
         ping_interval: None,
+        user_agent_header: str,
     ) -> WebSocketConnectionProtocol:
         await never.wait()
         raise AssertionError("inaccessible")
@@ -321,6 +323,7 @@ async def test_default_connector_disables_protocol_ping(
         open_timeout=2.0,
         close_timeout=3.0,
         ping_interval=None,
+        user_agent_header="OKX-AI-PRO/test",
     )
 
     assert result is connection
@@ -329,6 +332,7 @@ async def test_default_connector_disables_protocol_ping(
         "open_timeout": 2.0,
         "close_timeout": 3.0,
         "ping_interval": None,
+        "user_agent_header": "OKX-AI-PRO/test",
     }
 
 

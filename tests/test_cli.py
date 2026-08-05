@@ -22,7 +22,7 @@ def test_cli_validates_configuration_and_prepares_directories(
     assert "Configuration OKX AI PRO valide." in captured.out
     assert (tmp_path / "data").is_dir()
     assert (tmp_path / "logs").is_dir()
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.2.0"
 
 
 def test_cli_reports_invalid_configuration(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "okx-ai-pro"
-version = "0.1.0"
+version = "0.2.0"
 description = "Assistant local d'aide à la décision pour les Futures OKX"
 readme = "README.md"
 requires-python = ">=3.11"

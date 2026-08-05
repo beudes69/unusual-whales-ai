@@ -4,8 +4,8 @@ OKX AI PRO est un assistant local d'aide à la décision pour les contrats
 Futures `USDT-SWAP` d'OKX. Il est conçu pour fonctionner en continu, expliquer
 chaque signal et ne jamais ouvrir de position automatiquement.
 
-> État du projet : **phase 1 validée ; phase 2 en développement**. Aucun signal,
-> stratégie ou ordre n'est implémenté.
+> État du projet : **phase 1 validée ; phase 2 terminée, en attente de
+> validation**. Aucun signal, stratégie ou ordre n'est implémenté.
 
 ## Principes
 
@@ -44,7 +44,7 @@ uv run python main.py
 
 ```bash
 pkg update
-pkg install python git uv
+pkg install python git uv rust
 uv sync --locked
 uv run python main.py
 ```
@@ -106,14 +106,24 @@ uv run pytest --cov=okx_ai_pro --cov-report=term-missing
 ```
 
 La couverture minimale est fixée à 90 %. La CI exécute ces contrôles sous
-Python 3.13 sur Linux et Windows. Termux utilise le même code Python pur et les
-mêmes chemins basés sur `pathlib`.
+Python 3.13 sur Linux et Windows. Termux utilise les mêmes API Python et les
+mêmes chemins `pathlib` ; Rust est installé pour permettre la compilation de
+`pydantic-core` si aucun paquet Android précompilé n'est disponible.
 
 ## Architecture actuelle
 
 ```text
 .
 ├── src/okx_ai_pro/
+│   ├── okx/
+│   │   ├── client.py        # façade unique OkxClient
+│   │   ├── rest.py          # transport REST httpx
+│   │   ├── websocket.py     # temps réel et réabonnements
+│   │   ├── rate_limiter.py  # quotas par fenêtre glissante
+│   │   ├── retry.py         # backoff des erreurs transitoires
+│   │   ├── connection.py    # état et reconnexion
+│   │   ├── interfaces.py    # contrats remplaçables
+│   │   └── models.py        # réponses publiques validées
 │   ├── cli.py               # point d'entrée et validation du socle
 │   ├── default.toml         # valeurs centralisées
 │   ├── exceptions.py        # erreurs applicatives
@@ -128,7 +138,49 @@ mêmes chemins basés sur `pathlib`.
 
 Les répertoires `data/` et `logs/` sont créés au premier démarrage et ignorés
 par Git. Consulter [l'architecture](docs/architecture.md) pour les frontières
-prévues entre les futures phases.
+prévues entre les futures phases et la
+[documentation du moteur OKX](docs/okx-communication.md) pour ses contrats.
+
+## Moteur de communication OKX
+
+Le reste du projet doit importer uniquement `OkxClient` ou
+`OkxClientProtocol`. Il ne doit jamais créer directement un `RestClient` ou un
+`WebSocketClient`.
+
+Méthodes REST asynchrones disponibles :
+
+- `get_usdt_swap_contracts()` ;
+- `get_contract(instrument_id)` ;
+- `get_candles(instrument_id, ...)` ;
+- `get_funding_rate(instrument_id)` ;
+- `get_open_interest(instrument_id)` ;
+- `get_order_book(instrument_id, ...)` ;
+- `get_mark_price(instrument_id)` ;
+- `get_index_price(index_id)`.
+
+```python
+import asyncio
+
+from okx_ai_pro import load_settings
+from okx_ai_pro.okx import OkxClient
+
+
+async def inspect_contracts() -> None:
+    client = OkxClient.from_settings(load_settings())
+    try:
+        contracts = await client.get_usdt_swap_contracts()
+        print(f"{len(contracts)} contrats USDT-SWAP disponibles")
+    finally:
+        await client.close()
+
+
+asyncio.run(inspect_contracts())
+```
+
+Le WebSocket public accepte plusieurs `WebSocketSubscription`, restaure les
+abonnements après reconnexion et isole les erreurs des callbacks. Les appels
+publics ne nécessitent aucune clé API. Aucun endpoint privé ou endpoint d'ordre
+n'est présent.
 
 ## Avertissement
 
