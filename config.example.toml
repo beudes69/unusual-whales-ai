@@ -1,0 +1,16 @@
+# Seules les valeurs à modifier doivent figurer dans un fichier utilisateur.
+# Ce fichier ne doit jamais contenir de clé API.
+
+[app]
+environment = "production"
+timezone = "UTC"
+data_directory = "data"
+
+[logging]
+level = "INFO"
+console_enabled = true
+file_enabled = true
+directory = "logs"
+filename = "okx-ai-pro.log"
+max_bytes = 10485760
+backup_count = 5

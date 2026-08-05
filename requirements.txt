@@ -1,0 +1,2 @@
+# Les dépendances d'exécution sont déclarées dans pyproject.toml.
+.
