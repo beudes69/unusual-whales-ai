@@ -194,7 +194,11 @@ class WebSocketClient:
 
     async def _receive_loop(self, connection: WebSocketConnectionProtocol) -> None:
         while not self._stopping.is_set():
-            raw_message = await self._receive_with_heartbeat(connection)
+            try:
+                raw_message = await self._receive_with_heartbeat(connection)
+            except OkxInvalidDataError as exc:
+                self._logger.warning("Message WebSocket OKX ignoré : %s", exc)
+                continue
             if raw_message == "pong":
                 continue
             try:
