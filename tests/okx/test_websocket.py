@@ -9,10 +9,15 @@ from collections.abc import Callable
 
 import pytest
 
-from okx_ai_pro.okx.exceptions import OkxTimeoutError
+from okx_ai_pro.okx.exceptions import (
+    OkxNetworkError,
+    OkxTimeoutError,
+    OkxWebSocketClosedError,
+    OkxWebSocketError,
+)
 from okx_ai_pro.okx.interfaces import WebSocketConnectionProtocol
 from okx_ai_pro.okx.models import WebSocketMessage, WebSocketSubscription
-from okx_ai_pro.okx.websocket import WebSocketClient
+from okx_ai_pro.okx.websocket import WebSocketClient, default_websocket_connector
 from okx_ai_pro.settings import OkxSettings
 
 
@@ -22,20 +27,30 @@ class NoOpLimiter:
 
 
 class MockConnection:
-    def __init__(self, messages: list[str | bytes | BaseException] | None = None) -> None:
+    def __init__(
+        self,
+        messages: list[str | bytes | BaseException] | None = None,
+        *,
+        send_error: BaseException | None = None,
+    ) -> None:
         self.incoming: asyncio.Queue[str | bytes | BaseException] = asyncio.Queue()
         for message in messages or []:
             self.incoming.put_nowait(message)
         self.sent: list[str] = []
         self.sent_event = asyncio.Event()
+        self.received_event = asyncio.Event()
+        self.send_error = send_error
         self.closed = False
 
     async def send(self, message: str) -> None:
+        if self.send_error is not None:
+            raise self.send_error
         self.sent.append(message)
         self.sent_event.set()
 
     async def recv(self, decode: bool | None = None) -> str | bytes:
         message = await self.incoming.get()
+        self.received_event.set()
         if isinstance(message, BaseException):
             raise message
         return message
@@ -213,6 +228,12 @@ async def test_invalid_messages_and_callback_errors_are_isolated(
     await client.subscribe(subscription, working_callback)
     await client.start()
     connection.incoming.put_nowait("not-json")
+    connection.incoming.put_nowait(b"\xff")
+    connection.incoming.put_nowait(json.dumps([]))
+    connection.incoming.put_nowait(json.dumps({"arg": {}, "data": "invalid"}))
+    connection.incoming.put_nowait(json.dumps({"arg": {"channel": "tickers"}, "data": [1]}))
+    connection.incoming.put_nowait(json.dumps({"arg": {"channel": ""}, "data": [{}]}))
+    connection.incoming.put_nowait(json.dumps({"event": "subscribe"}))
     connection.incoming.put_nowait(
         json.dumps({"event": "error", "code": "60012", "msg": "invalid"})
     )
@@ -279,6 +300,127 @@ async def test_start_times_out_and_cancels_runner(
     with pytest.raises(OkxTimeoutError):
         await client.start()
     assert not client.is_connected
+
+
+@pytest.mark.asyncio
+async def test_default_connector_disables_protocol_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = MockConnection()
+    captured: dict[str, object] = {}
+
+    async def fake_connect(uri: str, **kwargs: object) -> MockConnection:
+        captured["uri"] = uri
+        captured.update(kwargs)
+        return connection
+
+    monkeypatch.setattr("okx_ai_pro.okx.websocket.connect", fake_connect)
+
+    result = await default_websocket_connector(
+        "wss://example.test/public",
+        open_timeout=2.0,
+        close_timeout=3.0,
+        ping_interval=None,
+    )
+
+    assert result is connection
+    assert captured == {
+        "uri": "wss://example.test/public",
+        "open_timeout": 2.0,
+        "close_timeout": 3.0,
+        "ping_interval": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_accepts_binary_utf8_pong(
+    okx_settings: OkxSettings,
+) -> None:
+    connection = MockConnection([b"pong"])
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+
+    await client.start()
+    await asyncio.wait_for(connection.received_event.wait(), 1)
+    await client.close()
+
+    assert connection.closed
+
+
+@pytest.mark.asyncio
+async def test_subscription_operations_handle_duplicates_and_send_failure(
+    okx_settings: OkxSettings,
+) -> None:
+    connection = MockConnection()
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    subscription = WebSocketSubscription(
+        channel="tickers",
+        instrument_id="BTC-USDT-SWAP",
+    )
+    unknown = WebSocketSubscription(
+        channel="tickers",
+        instrument_id="ETH-USDT-SWAP",
+    )
+
+    def first(message: WebSocketMessage) -> None:
+        return
+
+    def second(message: WebSocketMessage) -> None:
+        return
+
+    await client.start()
+    await client.unsubscribe(unknown)
+    await client.subscribe(subscription, first)
+    await client.subscribe(subscription, first)
+    await client.subscribe(subscription, second)
+    await client.unsubscribe(subscription, first)
+    await client.unsubscribe(subscription, first)
+    await client.unsubscribe(subscription, second)
+    await client.close()
+
+    assert [json.loads(message)["op"] for message in connection.sent] == [
+        "subscribe",
+        "unsubscribe",
+    ]
+
+    failing = MockConnection(send_error=OSError("closed"))
+    failing_client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([failing]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    await failing_client.start()
+    with pytest.raises(OkxWebSocketClosedError):
+        await failing_client.subscribe(subscription, first)
+    await failing_client.close()
+
+
+def test_transport_errors_are_always_normalized() -> None:
+    assert isinstance(
+        WebSocketClient._translate_transport_error(TimeoutError()),
+        OkxTimeoutError,
+    )
+    assert isinstance(
+        WebSocketClient._translate_transport_error(OSError()),
+        OkxWebSocketClosedError,
+    )
+    assert isinstance(
+        WebSocketClient._translate_transport_error(OkxNetworkError("offline")),
+        OkxWebSocketClosedError,
+    )
+    existing = OkxWebSocketError("known")
+    assert WebSocketClient._translate_transport_error(existing) is existing
+    assert isinstance(
+        WebSocketClient._translate_transport_error(ValueError()),
+        OkxWebSocketError,
+    )
 
 
 async def _no_sleep(delay: float) -> None:

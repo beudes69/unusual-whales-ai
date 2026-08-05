@@ -79,3 +79,28 @@ async def test_factory_builds_replaceable_production_components(
 
     assert not client.is_connected
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_async_context_and_close_preserve_cleanup() -> None:
+    rest = Mock(spec=RestClientProtocol)
+    websocket = Mock(spec=WebSocketClientProtocol)
+    rest.close = AsyncMock()
+    websocket.start = AsyncMock()
+    websocket.close = AsyncMock()
+    client = OkxClient(
+        cast(RestClientProtocol, rest),
+        cast(WebSocketClientProtocol, websocket),
+    )
+
+    async with client as entered:
+        assert entered is client
+
+    websocket.start.assert_awaited_once()
+    websocket.close.assert_awaited_once()
+    rest.close.assert_awaited_once()
+
+    websocket.close = AsyncMock(side_effect=RuntimeError("close failed"))
+    with pytest.raises(RuntimeError, match="close failed"):
+        await client.close()
+    assert rest.close.await_count == 2

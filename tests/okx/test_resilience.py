@@ -11,7 +11,7 @@ from okx_ai_pro.okx.exceptions import (
     OkxRateLimitError,
     OkxTimeoutError,
 )
-from okx_ai_pro.okx.rate_limiter import RateLimiter
+from okx_ai_pro.okx.rate_limiter import RateLimiter, SystemAsyncClock
 from okx_ai_pro.okx.retry import RetryManager
 from okx_ai_pro.settings import (
     RateLimitSettings,
@@ -47,6 +47,14 @@ async def test_rate_limiter_waits_for_sliding_window() -> None:
 
     assert clock.delays == [2.0]
     assert clock.current == 2.0
+
+
+@pytest.mark.asyncio
+async def test_system_clock_uses_non_blocking_runtime_primitives() -> None:
+    clock = SystemAsyncClock()
+
+    assert clock.now() > 0
+    await clock.sleep(0)
 
 
 @pytest.mark.asyncio
@@ -103,6 +111,34 @@ async def test_retry_honours_server_delay_and_stops_after_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retry_adds_configured_jitter() -> None:
+    delays: list[float] = []
+    attempts = 0
+
+    async def operation() -> str:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OkxTimeoutError("temporary")
+        return "ok"
+
+    manager = RetryManager(
+        RetrySettings(
+            max_attempts=2,
+            initial_delay_seconds=0.5,
+            maximum_delay_seconds=1.0,
+            multiplier=2.0,
+            jitter_seconds=0.25,
+        ),
+        sleep=_recording_sleep(delays),
+        random_uniform=lambda start, end: end,
+    )
+
+    assert await manager.execute(operation) == "ok"
+    assert delays == [0.75]
+
+
+@pytest.mark.asyncio
 async def test_retry_does_not_swallow_non_transient_error() -> None:
     manager = RetryManager(
         RetrySettings(
@@ -132,7 +168,7 @@ async def test_connection_manager_tracks_state_and_caps_backoff() -> None:
     )
 
     await manager.mark_connecting()
-    assert manager.state is ConnectionState.CONNECTING
+    assert manager.state.value == ConnectionState.CONNECTING.value
     await manager.mark_connected()
     await manager.wait_until_connected(0.1)
     assert manager.is_connected
@@ -141,7 +177,7 @@ async def test_connection_manager_tracks_state_and_caps_backoff() -> None:
     assert await manager.next_reconnect_delay() == 2.0
     await manager.mark_stopping()
     await manager.mark_stopped()
-    assert manager.state is ConnectionState.STOPPED
+    assert manager.state.value == ConnectionState.STOPPED.value
 
 
 @pytest.mark.asyncio
@@ -157,7 +193,7 @@ async def test_connection_wait_times_out() -> None:
     with pytest.raises(OkxTimeoutError):
         await manager.wait_until_connected(0.001)
     await manager.mark_disconnected()
-    assert manager.state is ConnectionState.DISCONNECTED
+    assert manager.state.value == ConnectionState.DISCONNECTED.value
 
 
 def _recording_sleep(delays: list[float]) -> Callable[[float], Awaitable[None]]:

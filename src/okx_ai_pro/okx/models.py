@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any
@@ -25,7 +25,7 @@ def _milliseconds_to_datetime(value: object) -> datetime | None:
         return None
     if isinstance(value, datetime):
         return value
-    return datetime.fromtimestamp(int(str(value)) / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(int(str(value)) / 1000, tz=UTC)
 
 
 OptionalDecimal = Annotated[Decimal | None, BeforeValidator(_empty_to_none)]
@@ -230,9 +230,21 @@ class WebSocketSubscription(OkxModel):
     """Description hashable d'un abonnement public OKX."""
 
     channel: str = Field(min_length=1)
-    instrument_id: str | None = Field(default=None, alias="instId")
-    instrument_type: str | None = Field(default=None, alias="instType")
-    instrument_family: str | None = Field(default=None, alias="instFamily")
+    instrument_id: str | None = Field(
+        default=None,
+        validation_alias="instId",
+        serialization_alias="instId",
+    )
+    instrument_type: str | None = Field(
+        default=None,
+        validation_alias="instType",
+        serialization_alias="instType",
+    )
+    instrument_family: str | None = Field(
+        default=None,
+        validation_alias="instFamily",
+        serialization_alias="instFamily",
+    )
 
     def as_api_argument(self) -> dict[str, str]:
         """Retourne l'argument d'abonnement attendu par OKX."""

@@ -1,11 +1,12 @@
 """Tests hors ligne du client REST OKX."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal
 
 import httpx
 import pytest
 
+from okx_ai_pro.exceptions import ConfigurationError
 from okx_ai_pro.okx.exceptions import (
     OkxApiError,
     OkxApiUnavailableError,
@@ -31,15 +32,14 @@ class NoOpLimiter:
         self.calls += 1
 
 
-def _envelope(data: list[object], *, code: str = "0", message: str = "") -> dict[str, object]:
-    return {"code": code, "msg": message, "data": data}
+def _envelope(data: Sequence[object], *, code: str = "0", message: str = "") -> dict[str, object]:
+    return {"code": code, "msg": message, "data": list(data)}
 
 
 def _limiters(limiter: NoOpLimiter | None = None) -> dict[str, NoOpLimiter]:
     shared = limiter or NoOpLimiter()
-    return {
-        key: shared
-        for key in (
+    return dict.fromkeys(
+        (
             "instruments",
             "candles",
             "funding_rate",
@@ -47,8 +47,9 @@ def _limiters(limiter: NoOpLimiter | None = None) -> dict[str, NoOpLimiter]:
             "order_book",
             "mark_price",
             "index_price",
-        )
-    }
+        ),
+        shared,
+    )
 
 
 @pytest.mark.asyncio
@@ -68,6 +69,7 @@ async def test_rest_parses_all_supported_public_endpoints(
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = request.url.path
+        data: list[object]
         if path.endswith("/public/instruments"):
             data = (
                 [instrument_payload]
@@ -324,3 +326,107 @@ async def test_rest_validates_request_parameters_without_network(
             await client.get_candles("BTC-USDT-SWAP", limit=301)
         with pytest.raises(OkxRequestError):
             await client.get_order_book("BTC-USDT-SWAP", depth=0)
+
+
+def test_rest_requires_every_configured_rate_limiter(
+    okx_settings: OkxSettings,
+) -> None:
+    with pytest.raises(ConfigurationError, match="index_price"):
+        RestClient(okx_settings, rate_limiters={"instruments": NoOpLimiter()})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "data"),
+    [
+        (
+            "candles",
+            [["1597026383085", "invalid"]],
+        ),
+        (
+            "book",
+            [{"asks": "invalid", "bids": [], "ts": "1597026383085"}],
+        ),
+    ],
+)
+async def test_rest_translates_specialized_parser_errors(
+    okx_settings: OkxSettings,
+    method: str,
+    data: list[object],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope(data))
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url=str(okx_settings.rest_base_url),
+    ) as http_client:
+        client = RestClient(
+            okx_settings,
+            http_client=http_client,
+            rate_limiters=_limiters(),
+        )
+        with pytest.raises(OkxInvalidDataError):
+            if method == "candles":
+                await client.get_candles("BTC-USDT-SWAP")
+            else:
+                await client.get_order_book("BTC-USDT-SWAP")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("50001", OkxApiUnavailableError),
+        ("50004", OkxTimeoutError),
+    ],
+)
+async def test_rest_translates_transient_api_codes(
+    okx_settings: OkxSettings,
+    code: str,
+    expected: type[Exception],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=_envelope([], code=code, message="temporary"),
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url=str(okx_settings.rest_base_url),
+    ) as http_client:
+        client = RestClient(
+            okx_settings,
+            http_client=http_client,
+            rate_limiters=_limiters(),
+        )
+        with pytest.raises(expected):
+            await client.get_mark_price("BTC-USDT-SWAP")
+
+
+@pytest.mark.asyncio
+async def test_contract_rejects_non_usdt_api_response(
+    okx_settings: OkxSettings,
+    instrument_payload: dict[str, str],
+) -> None:
+    payload = {
+        **instrument_payload,
+        "instId": "BTC-USDT-SWAP",
+        "settleCcy": "USDC",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_envelope([payload]))
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url=str(okx_settings.rest_base_url),
+    ) as http_client:
+        client = RestClient(
+            okx_settings,
+            http_client=http_client,
+            rate_limiters=_limiters(),
+        )
+        with pytest.raises(OkxInvalidDataError, match="réglé en USDT"):
+            await client.get_contract("BTC-USDT-SWAP")

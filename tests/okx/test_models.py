@@ -1,8 +1,8 @@
 """Tests des modèles de données OKX."""
 
-from datetime import timezone
-from decimal import Decimal
 from collections.abc import Callable
+from datetime import UTC
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
@@ -26,7 +26,7 @@ def test_parses_instrument_and_normalizes_empty_fields(
     assert instrument.base_currency is None
     assert instrument.expiry_time is None
     assert instrument.listing_time is not None
-    assert instrument.listing_time.tzinfo is timezone.utc
+    assert instrument.listing_time.tzinfo is UTC
 
 
 def test_parses_positional_candle_and_order_book() -> None:

@@ -254,7 +254,9 @@ class RestClient:
         message = str(payload.get("msg", "")).strip() or "Erreur API OKX sans détail."
         if code == "50011":
             raise OkxRateLimitError(message)
-        if code in {"50001", "50004"}:
+        if code == "50004":
+            raise OkxTimeoutError(message)
+        if code == "50001":
             raise OkxApiUnavailableError(message)
         if code != "0":
             raise OkxApiError(message, code=code)

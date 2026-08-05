@@ -16,6 +16,7 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 from okx_ai_pro.logging_config import get_logger
 from okx_ai_pro.okx.connection import ConnectionManager
 from okx_ai_pro.okx.exceptions import (
+    OkxCommunicationError,
     OkxInvalidDataError,
     OkxNetworkError,
     OkxSubscriptionError,
@@ -240,8 +241,8 @@ class WebSocketClient:
         if event is not None:
             if event in {"error", "channel-conn-count-error"}:
                 code = str(payload.get("code", ""))
-                message = str(payload.get("msg", "Abonnement refusé par OKX."))
-                raise OkxSubscriptionError(f"{code} {message}".strip())
+                error_message = str(payload.get("msg", "Abonnement refusé par OKX."))
+                raise OkxSubscriptionError(f"{code} {error_message}".strip())
             return
 
         argument = payload.get("arg")
@@ -306,7 +307,7 @@ class WebSocketClient:
         await self._connection_manager.mark_disconnected()
 
     @staticmethod
-    def _translate_transport_error(error: Exception) -> OkxWebSocketError:
+    def _translate_transport_error(error: Exception) -> OkxCommunicationError:
         if isinstance(error, OkxWebSocketError):
             return error
         if isinstance(error, TimeoutError):
