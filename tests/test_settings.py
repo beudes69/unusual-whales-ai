@@ -80,7 +80,7 @@ file_enabled = false
 @pytest.mark.parametrize(
     ("content", "message"),
     [
-        ("unknown = true", "inconnue"),
+        ("unknown = true", "Extra inputs are not permitted"),
         ("[app]\nenvironment = 'invalid'", "app.environment"),
         ("[logging]\nlevel = 'TRACE'", "logging.level"),
         ("[logging]\nmax_bytes = 0", "max_bytes"),
@@ -98,12 +98,12 @@ def test_rejects_invalid_configuration(tmp_path: Path, content: str, message: st
 def test_rejects_unknown_nested_key(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path / "invalid.toml", "[app]\ntypo = true")
 
-    with pytest.raises(ConfigurationError, match="app.typo"):
+    with pytest.raises(ConfigurationError, match=r"app\.typo"):
         load_settings(config_path, environ={}, base_directory=tmp_path)
 
 
 def test_rejects_invalid_boolean_environment_value(tmp_path: Path) -> None:
-    with pytest.raises(ConfigurationError, match="OKX_AI_PRO_LOG_FILE_ENABLED"):
+    with pytest.raises(ConfigurationError, match=r"logging\.file_enabled"):
         load_settings(
             environ={"OKX_AI_PRO_LOG_FILE_ENABLED": "sometimes"},
             base_directory=tmp_path,
