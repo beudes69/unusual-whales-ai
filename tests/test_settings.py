@@ -78,7 +78,7 @@ file_enabled = false
 @pytest.mark.parametrize(
     ("content", "message"),
     [
-        ("unknown = true", "Clé(s) inconnue(s)"),
+        ("unknown = true", "inconnue"),
         ("[app]\nenvironment = 'invalid'", "app.environment"),
         ("[logging]\nlevel = 'TRACE'", "logging.level"),
         ("[logging]\nmax_bytes = 0", "max_bytes"),

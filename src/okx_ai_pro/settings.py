@@ -172,8 +172,9 @@ def _build_settings(config: Mapping[str, object], base_directory: Path) -> Setti
     timezone = _expect_string(app, "timezone")
     level = _expect_string(logging_config, "level").upper()
     if level not in _LOG_LEVELS:
+        accepted_levels = ", ".join(sorted(_LOG_LEVELS))
         raise ConfigurationError(
-            f"logging.level invalide : {level}. Valeurs acceptées : {', '.join(sorted(_LOG_LEVELS))}"
+            f"logging.level invalide : {level}. Valeurs acceptées : {accepted_levels}"
         )
 
     filename = _expect_string(logging_config, "filename")
@@ -187,17 +188,13 @@ def _build_settings(config: Mapping[str, object], base_directory: Path) -> Setti
         app=AppSettings(
             environment=environment,
             timezone=timezone,
-            data_directory=_resolve_path(
-                _expect_string(app, "data_directory"), base_directory
-            ),
+            data_directory=_resolve_path(_expect_string(app, "data_directory"), base_directory),
         ),
         logging=LoggingSettings(
             level=level,
             console_enabled=_expect_boolean(logging_config, "console_enabled"),
             file_enabled=_expect_boolean(logging_config, "file_enabled"),
-            directory=_resolve_path(
-                _expect_string(logging_config, "directory"), base_directory
-            ),
+            directory=_resolve_path(_expect_string(logging_config, "directory"), base_directory),
             filename=filename,
             max_bytes=max_bytes,
             backup_count=backup_count,
@@ -239,9 +236,7 @@ def _parse_boolean(value: str, variable: str) -> bool:
         return True
     if normalized in {"0", "false", "no", "off"}:
         return False
-    raise ConfigurationError(
-        f"{variable} doit contenir true/false, yes/no, on/off ou 1/0."
-    )
+    raise ConfigurationError(f"{variable} doit contenir true/false, yes/no, on/off ou 1/0.")
 
 
 def _resolve_path(value: str, base_directory: Path) -> Path:

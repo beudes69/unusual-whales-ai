@@ -49,13 +49,14 @@ def test_reconfiguration_does_not_duplicate_handlers(tmp_path: Path) -> None:
 
 
 def test_uses_null_handler_when_all_outputs_are_disabled(tmp_path: Path) -> None:
+    log_directory = tmp_path / "disabled-logs"
     logger = configure_logging(
-        _logging_settings(tmp_path, console_enabled=False, file_enabled=False)
+        _logging_settings(log_directory, console_enabled=False, file_enabled=False)
     )
 
     assert len(logger.handlers) == 1
     assert isinstance(logger.handlers[0], logging.NullHandler)
-    assert not tmp_path.exists()
+    assert not log_directory.exists()
 
 
 def test_get_logger_normalizes_application_prefix() -> None:

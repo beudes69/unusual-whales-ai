@@ -17,7 +17,10 @@ _DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
 class _UtcFormatter(logging.Formatter):
     """Formateur dont tous les horodatages sont explicitement en UTC."""
 
-    converter = time.gmtime
+    @staticmethod
+    def converter(timestamp: float | None) -> time.struct_time:
+        """Convertit un timestamp Unix en temps UTC structuré."""
+        return time.gmtime(timestamp)
 
 
 def configure_logging(settings: LoggingSettings) -> logging.Logger:
