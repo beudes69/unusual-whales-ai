@@ -586,6 +586,55 @@ async def test_maintenance_notice_triggers_reconnection(
     assert second.closed
 
 
+@pytest.mark.asyncio
+async def test_business_candle_arrays_are_converted_to_immutable_rows(
+    okx_settings: OkxSettings,
+) -> None:
+    connection = MockConnection()
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    subscription = WebSocketSubscription(
+        channel="candle1m",
+        instrument_id="BTC-USDT-SWAP",
+    )
+    delivered = asyncio.Event()
+    received: list[WebSocketMessage] = []
+
+    def callback(message: WebSocketMessage) -> None:
+        received.append(message)
+        delivered.set()
+
+    await client.subscribe(subscription, callback)
+    await client.start()
+    connection.incoming.put_nowait(
+        json.dumps(
+            {
+                "arg": {"channel": "candle1m", "instId": "BTC-USDT-SWAP"},
+                "data": [
+                    [
+                        "1785931200000",
+                        "100",
+                        "110",
+                        "90",
+                        "105",
+                        "10",
+                        "1",
+                        "1000",
+                        "1",
+                    ]
+                ],
+            }
+        )
+    )
+    await asyncio.wait_for(delivered.wait(), 1)
+    await client.close()
+
+    assert isinstance(received[0].data[0], tuple)
+
+
 async def _no_sleep(delay: float) -> None:
     await asyncio.sleep(0)
 

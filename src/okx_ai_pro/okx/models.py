@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeAlias
 
 from pydantic import (
     BaseModel,
@@ -31,6 +31,7 @@ def _milliseconds_to_datetime(value: object) -> datetime | None:
 OptionalDecimal = Annotated[Decimal | None, BeforeValidator(_empty_to_none)]
 OptionalTimestamp = Annotated[datetime | None, BeforeValidator(_milliseconds_to_datetime)]
 Timestamp = Annotated[datetime, BeforeValidator(_milliseconds_to_datetime)]
+WebSocketPayload: TypeAlias = dict[str, object] | tuple[object, ...]
 
 
 class CandleBar(StrEnum):
@@ -257,7 +258,7 @@ class WebSocketMessage(OkxModel):
 
     subscription: WebSocketSubscription
     action: str | None = None
-    data: tuple[dict[str, object], ...]
+    data: tuple[WebSocketPayload, ...]
 
 
 def _optional_int(value: object) -> int | None:

@@ -298,7 +298,7 @@ class WebSocketClient:
         data = payload.get("data")
         if not isinstance(argument, dict) or not isinstance(data, list):
             raise OkxInvalidDataError("Message de données WebSocket incomplet.")
-        if not all(isinstance(item, dict) for item in data):
+        if not all(isinstance(item, (dict, list)) for item in data):
             raise OkxInvalidDataError("Données WebSocket invalides.")
 
         try:
@@ -306,7 +306,12 @@ class WebSocketClient:
             message = WebSocketMessage(
                 subscription=subscription,
                 action=(str(payload["action"]) if payload.get("action") is not None else None),
-                data=tuple(cast(dict[str, object], item) for item in data),
+                data=tuple(
+                    cast(dict[str, object], item)
+                    if isinstance(item, dict)
+                    else tuple(cast(list[object], item))
+                    for item in data
+                ),
             )
         except ValidationError as exc:
             raise OkxInvalidDataError("Contrat WebSocket OKX invalide.") from exc

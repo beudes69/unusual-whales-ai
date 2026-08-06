@@ -22,6 +22,7 @@ from okx_ai_pro.data.models import (
     OrderBookSnapshot,
     TickerSnapshot,
 )
+from okx_ai_pro.data.normalization import DataNormalizer, OrderBookAssembler
 from okx_ai_pro.data.quality import (
     AnomalyKind,
     DataAnomaly,
@@ -39,6 +40,7 @@ __all__ = [
     "DataAnomaly",
     "DataEngineError",
     "DataNormalizationError",
+    "DataNormalizer",
     "DataQualityGate",
     "DataQualityValidator",
     "DataRecord",
@@ -53,6 +55,7 @@ __all__ = [
     "MarkPriceSnapshot",
     "MemoryCache",
     "OpenInterestSnapshot",
+    "OrderBookAssembler",
     "OrderBookLevel",
     "OrderBookSnapshot",
     "SQLiteRepository",
