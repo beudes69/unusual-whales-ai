@@ -26,6 +26,7 @@ async def test_facade_delegates_every_public_operation() -> None:
     rest.close = AsyncMock()
     websocket.start = AsyncMock()
     websocket.subscribe = AsyncMock()
+    websocket.subscribe_many = AsyncMock()
     websocket.unsubscribe = AsyncMock()
     websocket.close = AsyncMock()
     websocket.is_connected = True
@@ -56,6 +57,7 @@ async def test_facade_delegates_every_public_operation() -> None:
     await client.get_mark_price("BTC-USDT-SWAP")
     await client.get_index_price("BTC-USDT")
     await client.subscribe(subscription, callback)
+    await client.subscribe_many(((subscription, callback),))
     await client.unsubscribe(subscription, callback)
     await client.close()
 
@@ -67,6 +69,7 @@ async def test_facade_delegates_every_public_operation() -> None:
         before="2",
     )
     websocket.subscribe.assert_awaited_once_with(subscription, callback)
+    websocket.subscribe_many.assert_awaited_once_with(((subscription, callback),))
     websocket.close.assert_awaited_once()
     rest.close.assert_awaited_once()
 

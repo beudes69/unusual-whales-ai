@@ -52,16 +52,17 @@ class MockConnection:
         self.sent_event.set()
         if self.auto_acknowledge and message.startswith("{"):
             command = json.loads(message)
-            self.incoming.put_nowait(
-                json.dumps(
-                    {
-                        "id": command["id"],
-                        "event": command["op"],
-                        "arg": command["args"][0],
-                        "connId": "test-connection",
-                    }
+            for argument in command["args"]:
+                self.incoming.put_nowait(
+                    json.dumps(
+                        {
+                            "id": command["id"],
+                            "event": command["op"],
+                            "arg": argument,
+                            "connId": "test-connection",
+                        }
+                    )
                 )
-            )
 
     async def recv(self, decode: bool | None = None) -> str | bytes:
         message = await self.incoming.get()
@@ -633,6 +634,51 @@ async def test_business_candle_arrays_are_converted_to_immutable_rows(
     await client.close()
 
     assert isinstance(received[0].data[0], tuple)
+
+
+@pytest.mark.asyncio
+async def test_multiple_subscriptions_are_batched_and_split_by_size(
+    okx_settings: OkxSettings,
+) -> None:
+    subscriptions = tuple(
+        (
+            WebSocketSubscription(
+                channel="tickers",
+                instrument_id=f"{currency}-USDT-SWAP",
+            ),
+            lambda message: None,
+        )
+        for currency in ("BTC", "ETH", "SOL")
+    )
+    connection = MockConnection()
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+
+    await client.start()
+    await client.subscribe_many(subscriptions)
+    await client.close()
+
+    assert len(connection.sent) == 1
+    assert len(json.loads(connection.sent[0])["args"]) == 3
+
+    split_settings = _fast_settings(okx_settings).model_copy(
+        update={"websocket_max_command_bytes": 150}
+    )
+    split_connection = MockConnection()
+    split_client = WebSocketClient(
+        split_settings,
+        connector=SequenceConnector([split_connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    await split_client.start()
+    await split_client.subscribe_many(subscriptions)
+    await split_client.close()
+
+    assert len(split_connection.sent) == 3
+    assert all(len(message.encode("utf-8")) <= 150 for message in split_connection.sent)
 
 
 async def _no_sleep(delay: float) -> None:

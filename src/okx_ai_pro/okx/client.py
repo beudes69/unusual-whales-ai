@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from okx_ai_pro.okx.interfaces import (
     MessageCallback,
     RestClientProtocol,
@@ -94,6 +96,13 @@ class OkxClient:
         callback: MessageCallback,
     ) -> None:
         await self._websocket.subscribe(subscription, callback)
+
+    async def subscribe_many(
+        self,
+        subscriptions: Sequence[tuple[WebSocketSubscription, MessageCallback]],
+    ) -> None:
+        """Enregistre plusieurs abonnements en commandes groupées."""
+        await self._websocket.subscribe_many(subscriptions)
 
     async def unsubscribe(
         self,

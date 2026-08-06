@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
@@ -44,7 +44,7 @@ Operation = Literal["subscribe", "unsubscribe"]
 @dataclass(slots=True)
 class _PendingOperation:
     operation: Operation
-    subscription: WebSocketSubscription
+    remaining: set[WebSocketSubscription]
     future: asyncio.Future[None] | None
 
 
@@ -140,6 +140,23 @@ class WebSocketClient:
                         if not registered_callbacks:
                             self._subscriptions.pop(subscription)
                 raise
+
+    async def subscribe_many(
+        self,
+        subscriptions: Sequence[tuple[WebSocketSubscription, MessageCallback]],
+    ) -> None:
+        """Enregistre puis envoie les nouveaux abonnements par lots bornés."""
+        pending: list[WebSocketSubscription] = []
+        async with self._subscriptions_lock:
+            for subscription, callback in subscriptions:
+                callbacks = self._subscriptions.setdefault(subscription, [])
+                if callback not in callbacks:
+                    if not callbacks:
+                        pending.append(subscription)
+                    callbacks.append(callback)
+        if self.is_connected and pending:
+            for batch in self._subscription_batches("subscribe", pending):
+                await self._send_operations("subscribe", batch)
 
     async def unsubscribe(
         self,
@@ -275,19 +292,28 @@ class WebSocketClient:
         if event is not None:
             operation_id = str(payload.get("id", ""))
             if event in {"subscribe", "unsubscribe"}:
-                self._acknowledge_operation(operation_id)
+                argument = payload.get("arg")
+                if not isinstance(argument, dict):
+                    raise OkxInvalidDataError("Acknowledgement WebSocket sans argument.")
+                try:
+                    acknowledged = WebSocketSubscription.model_validate(argument)
+                except ValidationError as exc:
+                    raise OkxInvalidDataError(
+                        "Argument d'acknowledgement WebSocket invalide."
+                    ) from exc
+                self._acknowledge_operation(operation_id, acknowledged)
                 return
             if event in {"error", "channel-conn-count-error"}:
                 code = str(payload.get("code", ""))
                 error_message = str(payload.get("msg", "Abonnement refusé par OKX."))
                 error = OkxSubscriptionError(f"{code} {error_message}".strip())
-                self._reject_operation(operation_id, error)
                 argument = payload.get("arg")
+                rejected: WebSocketSubscription | None = None
                 if isinstance(argument, dict):
                     with suppress(ValidationError):
-                        self._active_subscriptions.discard(
-                            WebSocketSubscription.model_validate(argument)
-                        )
+                        rejected = WebSocketSubscription.model_validate(argument)
+                        self._active_subscriptions.discard(rejected)
+                self._reject_operation(operation_id, rejected, error)
                 raise error
             if event == "notice" and str(payload.get("code", "")) == "64008":
                 raise OkxWebSocketClosedError("Maintenance OKX annoncée ; reconnexion anticipée.")
@@ -334,10 +360,10 @@ class WebSocketClient:
     async def _restore_subscriptions(self) -> None:
         async with self._subscriptions_lock:
             subscriptions = tuple(self._subscriptions)
-        for subscription in subscriptions:
-            await self._send_operation(
+        for batch in self._subscription_batches("subscribe", subscriptions):
+            await self._send_operations(
                 "subscribe",
-                subscription,
+                batch,
                 wait_for_acknowledgement=False,
             )
 
@@ -348,17 +374,27 @@ class WebSocketClient:
         *,
         wait_for_acknowledgement: bool = True,
     ) -> None:
+        await self._send_operations(
+            operation,
+            (subscription,),
+            wait_for_acknowledgement=wait_for_acknowledgement,
+        )
+
+    async def _send_operations(
+        self,
+        operation: Operation,
+        subscriptions: Sequence[WebSocketSubscription],
+        *,
+        wait_for_acknowledgement: bool = True,
+    ) -> None:
         connection = self._connection
         if connection is None:
             raise OkxWebSocketClosedError("WebSocket OKX non connecté.")
         operation_id = f"{operation[0]}{next(self._operation_ids)}"
-        payload = json.dumps(
-            {
-                "id": operation_id,
-                "op": operation,
-                "args": [subscription.as_api_argument()],
-            },
-            separators=(",", ":"),
+        payload = self._serialize_operation(
+            operation_id,
+            operation,
+            subscriptions,
         )
         if len(payload.encode("utf-8")) > self._settings.websocket_max_command_bytes:
             raise OkxSubscriptionError(
@@ -369,7 +405,7 @@ class WebSocketClient:
         future = asyncio.get_running_loop().create_future() if wait_for_acknowledgement else None
         self._pending_operations[operation_id] = _PendingOperation(
             operation=operation,
-            subscription=subscription,
+            remaining=set(subscriptions),
             future=future,
         )
         try:
@@ -394,32 +430,88 @@ class WebSocketClient:
             future.cancel()
             raise
 
-    def _acknowledge_operation(self, operation_id: str) -> None:
-        pending = self._pending_operations.pop(operation_id, None)
+    def _acknowledge_operation(
+        self,
+        operation_id: str,
+        subscription: WebSocketSubscription,
+    ) -> None:
+        pending = self._pending_operations.get(operation_id)
         if pending is None:
             self._logger.debug(
                 "Acknowledgement WebSocket sans commande en attente : %s",
                 operation_id,
             )
             return
+        if subscription not in pending.remaining:
+            return
         if pending.operation == "subscribe":
-            self._active_subscriptions.add(pending.subscription)
+            self._active_subscriptions.add(subscription)
         else:
-            self._active_subscriptions.discard(pending.subscription)
-        if pending.future is not None and not pending.future.done():
-            pending.future.set_result(None)
+            self._active_subscriptions.discard(subscription)
+        pending.remaining.discard(subscription)
+        if not pending.remaining:
+            self._pending_operations.pop(operation_id, None)
+            if pending.future is not None and not pending.future.done():
+                pending.future.set_result(None)
 
     def _reject_operation(
         self,
         operation_id: str,
+        subscription: WebSocketSubscription | None,
         error: OkxSubscriptionError,
     ) -> None:
-        pending = self._pending_operations.pop(operation_id, None)
+        pending = self._pending_operations.get(operation_id)
         if pending is None:
             return
-        self._active_subscriptions.discard(pending.subscription)
+        rejected = (
+            {subscription}
+            if subscription is not None and subscription in pending.remaining
+            else set(pending.remaining)
+        )
+        for item in rejected:
+            self._active_subscriptions.discard(item)
+            pending.remaining.discard(item)
         if pending.future is not None and not pending.future.done():
             pending.future.set_exception(error)
+        if not pending.remaining:
+            self._pending_operations.pop(operation_id, None)
+
+    def _subscription_batches(
+        self,
+        operation: Operation,
+        subscriptions: Sequence[WebSocketSubscription],
+    ) -> tuple[tuple[WebSocketSubscription, ...], ...]:
+        batches: list[tuple[WebSocketSubscription, ...]] = []
+        current: list[WebSocketSubscription] = []
+        for subscription in subscriptions:
+            candidate = (*current, subscription)
+            probe = self._serialize_operation("x" * 32, operation, candidate)
+            if current and len(probe.encode("utf-8")) > self._settings.websocket_max_command_bytes:
+                batches.append(tuple(current))
+                current = [subscription]
+            else:
+                current.append(subscription)
+            single = self._serialize_operation("x" * 32, operation, current)
+            if len(single.encode("utf-8")) > self._settings.websocket_max_command_bytes:
+                raise OkxSubscriptionError("Un abonnement dépasse la taille maximale configurée.")
+        if current:
+            batches.append(tuple(current))
+        return tuple(batches)
+
+    @staticmethod
+    def _serialize_operation(
+        operation_id: str,
+        operation: Operation,
+        subscriptions: Sequence[WebSocketSubscription],
+    ) -> str:
+        return json.dumps(
+            {
+                "id": operation_id,
+                "op": operation,
+                "args": [subscription.as_api_argument() for subscription in subscriptions],
+            },
+            separators=(",", ":"),
+        )
 
     def _fail_pending_operations(self) -> None:
         for pending in self._pending_operations.values():

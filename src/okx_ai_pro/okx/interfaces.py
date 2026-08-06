@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Protocol, TypeVar
 
 from okx_ai_pro.okx.models import (
@@ -99,6 +99,11 @@ class WebSocketClientProtocol(Protocol):
 
     async def subscribe(
         self, subscription: WebSocketSubscription, callback: MessageCallback
+    ) -> None: ...
+
+    async def subscribe_many(
+        self,
+        subscriptions: Sequence[tuple[WebSocketSubscription, MessageCallback]],
     ) -> None: ...
 
     async def unsubscribe(
