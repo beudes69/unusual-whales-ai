@@ -146,11 +146,12 @@ class OrderBookAssembler:
                 self._apply_side(state.bids, wire.bids)
                 self._states[instrument_id] = state
             elif action == "update":
-                state = self._states.get(instrument_id)
-                if state is None:
+                existing_state = self._states.get(instrument_id)
+                if existing_state is None:
                     raise DataSequenceError(
                         f"Delta carnet reçu avant snapshot pour {instrument_id}."
                     )
+                state = existing_state
                 if wire.previous_sequence_id != state.sequence_id:
                     self._states.pop(instrument_id, None)
                     raise DataSequenceError(f"Rupture de séquence carnet pour {instrument_id}.")
