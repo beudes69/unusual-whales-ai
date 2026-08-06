@@ -134,10 +134,10 @@ class WebSocketClient:
                 await self._send_operation("subscribe", subscription)
             except OkxSubscriptionError:
                 async with self._subscriptions_lock:
-                    callbacks = self._subscriptions.get(subscription)
-                    if callbacks is not None and callback in callbacks:
-                        callbacks.remove(callback)
-                        if not callbacks:
+                    registered_callbacks = self._subscriptions.get(subscription)
+                    if registered_callbacks is not None and callback in registered_callbacks:
+                        registered_callbacks.remove(callback)
+                        if not registered_callbacks:
                             self._subscriptions.pop(subscription)
                 raise
 
