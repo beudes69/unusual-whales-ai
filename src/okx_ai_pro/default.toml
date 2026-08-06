@@ -1,0 +1,102 @@
+[app]
+environment = "development"
+timezone = "UTC"
+data_directory = "data"
+
+[logging]
+level = "INFO"
+console_enabled = true
+file_enabled = true
+directory = "logs"
+filename = "okx-ai-pro.log"
+max_bytes = 10485760
+backup_count = 5
+
+[okx]
+rest_base_url = "https://openapi.okx.com"
+websocket_public_url = "wss://ws.okx.com:8443/ws/v5/public"
+websocket_business_url = "wss://ws.okx.com:8443/ws/v5/business"
+user_agent = "OKX-AI-PRO/0.2.0"
+request_timeout_seconds = 10.0
+websocket_open_timeout_seconds = 10.0
+websocket_close_timeout_seconds = 10.0
+websocket_receive_timeout_seconds = 20.0
+websocket_heartbeat_timeout_seconds = 5.0
+websocket_ack_timeout_seconds = 5.0
+websocket_max_command_bytes = 65536
+
+[okx.subscription_limit]
+max_requests = 480
+period_seconds = 3600.0
+
+[okx.retry]
+max_attempts = 3
+initial_delay_seconds = 0.5
+maximum_delay_seconds = 8.0
+multiplier = 2.0
+jitter_seconds = 0.1
+
+[okx.reconnect]
+initial_delay_seconds = 1.0
+maximum_delay_seconds = 30.0
+multiplier = 2.0
+
+[okx.rate_limits.instruments]
+max_requests = 20
+period_seconds = 2.0
+
+[okx.rate_limits.candles]
+max_requests = 40
+period_seconds = 2.0
+
+[okx.rate_limits.funding_rate]
+max_requests = 10
+period_seconds = 2.0
+
+[okx.rate_limits.open_interest]
+max_requests = 20
+period_seconds = 2.0
+
+[okx.rate_limits.order_book]
+max_requests = 40
+period_seconds = 2.0
+
+[okx.rate_limits.mark_price]
+max_requests = 10
+period_seconds = 2.0
+
+[okx.rate_limits.index_price]
+max_requests = 20
+period_seconds = 2.0
+
+[data.cache]
+ttl_seconds = 300.0
+maximum_entries = 100000
+purge_interval_seconds = 30.0
+
+[data.sqlite]
+path = "data/okx-ai-pro.sqlite3"
+busy_timeout_milliseconds = 5000
+journal_mode = "WAL"
+synchronous = "NORMAL"
+
+[data.collection]
+order_book_depth = 50
+candle_history_limit = 300
+rest_concurrency = 20
+writer_queue_size = 50000
+writer_batch_size = 500
+writer_flush_interval_seconds = 0.5
+instrument_refresh_seconds = 3600.0
+candle_timeframes = ["1m", "5m", "15m", "1H", "4H", "1D"]
+ticker_channel = "tickers"
+mark_price_channel = "mark-price"
+index_ticker_channel = "index-tickers"
+open_interest_channel = "open-interest"
+funding_rate_channel = "funding-rate"
+order_book_channel = "books"
+candle_channel_prefix = "candle"
+
+[data.quality]
+minimum_timestamp = 2017-01-01T00:00:00Z
+maximum_future_seconds = 30.0
