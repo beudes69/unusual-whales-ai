@@ -6,10 +6,11 @@ import os
 import tomllib
 from collections.abc import Mapping
 from copy import deepcopy
+from datetime import UTC, datetime
 from enum import StrEnum
 from importlib.resources import files
 from pathlib import Path
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from pydantic import (
     AnyHttpUrl,
@@ -127,6 +128,7 @@ class OkxSettings(_FrozenModel):
 
     rest_base_url: AnyHttpUrl
     websocket_public_url: WebsocketUrl
+    websocket_business_url: WebsocketUrl
     user_agent: str = Field(min_length=1)
     request_timeout_seconds: PositiveFloat
     websocket_open_timeout_seconds: PositiveFloat
@@ -141,6 +143,73 @@ class OkxSettings(_FrozenModel):
     rate_limits: dict[str, RateLimitSettings]
 
 
+class CacheSettings(_FrozenModel):
+    """Paramètres du cache mémoire TTL/LRU."""
+
+    ttl_seconds: PositiveFloat
+    maximum_entries: PositiveInt
+    purge_interval_seconds: PositiveFloat
+
+
+class SQLiteSettings(_FrozenModel):
+    """Paramètres du dépôt SQLite local."""
+
+    path: Path
+    busy_timeout_milliseconds: PositiveInt
+    journal_mode: Literal["WAL", "DELETE", "TRUNCATE"]
+    synchronous: Literal["OFF", "NORMAL", "FULL", "EXTRA"]
+
+
+class CollectionSettings(_FrozenModel):
+    """Paramètres de collecte et d'écriture."""
+
+    order_book_depth: Annotated[int, Field(ge=1, le=400)]
+    candle_history_limit: Annotated[int, Field(ge=1, le=300)]
+    rest_concurrency: PositiveInt
+    writer_queue_size: PositiveInt
+    writer_batch_size: PositiveInt
+    writer_flush_interval_seconds: PositiveFloat
+    instrument_refresh_seconds: PositiveFloat
+    candle_timeframes: tuple[str, ...] = Field(min_length=1)
+    ticker_channel: str = Field(min_length=1)
+    mark_price_channel: str = Field(min_length=1)
+    index_ticker_channel: str = Field(min_length=1)
+    open_interest_channel: str = Field(min_length=1)
+    funding_rate_channel: str = Field(min_length=1)
+    order_book_channel: str = Field(min_length=1)
+    candle_channel_prefix: str = Field(min_length=1)
+
+    @field_validator("candle_timeframes")
+    @classmethod
+    def validate_unique_timeframes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("Les timeframes de bougies doivent être uniques.")
+        return value
+
+
+class DataQualitySettings(_FrozenModel):
+    """Bornes temporelles utilisées pour contrôler les observations."""
+
+    minimum_timestamp: datetime
+    maximum_future_seconds: NonNegativeFloat
+
+    @field_validator("minimum_timestamp")
+    @classmethod
+    def normalize_minimum_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("data.quality.minimum_timestamp doit contenir un fuseau.")
+        return value.astimezone(UTC)
+
+
+class DataSettings(_FrozenModel):
+    """Configuration du moteur de données."""
+
+    cache: CacheSettings
+    sqlite: SQLiteSettings
+    collection: CollectionSettings
+    quality: DataQualitySettings
+
+
 class Settings(BaseSettings):
     """Configuration pydantic-settings validée et immuable."""
 
@@ -149,10 +218,12 @@ class Settings(BaseSettings):
     app: AppSettings
     logging: LoggingSettings
     okx: OkxSettings
+    data: DataSettings
 
     def prepare_runtime_directories(self) -> None:
         """Crée uniquement les répertoires nécessaires à l'exécution."""
         self.app.data_directory.mkdir(parents=True, exist_ok=True)
+        self.data.sqlite.path.parent.mkdir(parents=True, exist_ok=True)
         if self.logging.file_enabled:
             self.logging.directory.mkdir(parents=True, exist_ok=True)
 
@@ -233,10 +304,15 @@ def _set_nested(config: dict[str, object], path: tuple[str, ...], value: str) ->
 def _resolve_runtime_paths(config: dict[str, object], base_directory: Path) -> None:
     app = config.get("app")
     logging_config = config.get("logging")
+    data_config = config.get("data")
     if isinstance(app, dict) and isinstance(app.get("data_directory"), str):
         app["data_directory"] = _resolve_path(app["data_directory"], base_directory)
     if isinstance(logging_config, dict) and isinstance(logging_config.get("directory"), str):
         logging_config["directory"] = _resolve_path(logging_config["directory"], base_directory)
+    if isinstance(data_config, dict):
+        sqlite_config = data_config.get("sqlite")
+        if isinstance(sqlite_config, dict) and isinstance(sqlite_config.get("path"), str):
+            sqlite_config["path"] = _resolve_path(sqlite_config["path"], base_directory)
 
 
 def _resolve_path(value: str, base_directory: Path) -> Path:

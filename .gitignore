@@ -15,8 +15,8 @@ dist/
 venv/
 
 # Runtime data
-data/
-logs/
+/data/
+/logs/
 *.log
 
 # Local configuration and secrets

@@ -23,6 +23,15 @@ def test_loads_packaged_defaults_without_creating_directories(tmp_path: Path) ->
     assert settings.logging.file_path == tmp_path / "logs" / "okx-ai-pro.log"
     assert str(settings.okx.rest_base_url) == "https://openapi.okx.com/"
     assert settings.okx.rate_limits["candles"].max_requests == 40
+    assert settings.data.sqlite.path == tmp_path / "data" / "okx-ai-pro.sqlite3"
+    assert settings.data.collection.candle_timeframes == (
+        "1m",
+        "5m",
+        "15m",
+        "1H",
+        "4H",
+        "1D",
+    )
     assert not settings.app.data_directory.exists()
     assert not settings.logging.directory.exists()
 
@@ -74,6 +83,7 @@ file_enabled = false
     settings.prepare_runtime_directories()
 
     assert settings.app.data_directory.is_dir()
+    assert settings.data.sqlite.path.parent.is_dir()
     assert not settings.logging.directory.exists()
 
 

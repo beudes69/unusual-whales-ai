@@ -18,6 +18,13 @@ backup_count = 5
 [okx]
 rest_base_url = "https://openapi.okx.com"
 websocket_public_url = "wss://ws.okx.com:8443/ws/v5/public"
+websocket_business_url = "wss://ws.okx.com:8443/ws/v5/business"
 request_timeout_seconds = 10.0
 websocket_receive_timeout_seconds = 20.0
 websocket_ack_timeout_seconds = 5.0
+
+[data.sqlite]
+path = "data/okx-ai-pro.sqlite3"
+
+[data.collection]
+order_book_depth = 50

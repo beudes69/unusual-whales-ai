@@ -44,6 +44,7 @@ class CandleBar(StrEnum):
     H1 = "1H"
     H2 = "2H"
     H4 = "4H"
+    D1 = "1D"
     H6_UTC = "6Hutc"
     H12_UTC = "12Hutc"
     D1_UTC = "1Dutc"
