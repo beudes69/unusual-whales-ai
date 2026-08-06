@@ -379,6 +379,7 @@ async def test_rest_translates_specialized_parser_errors(
     [
         ("50001", OkxApiUnavailableError),
         ("50004", OkxTimeoutError),
+        ("50013", OkxApiUnavailableError),
     ],
 )
 async def test_rest_translates_transient_api_codes(

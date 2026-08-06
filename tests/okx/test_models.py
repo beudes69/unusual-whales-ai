@@ -68,7 +68,9 @@ def test_parses_positional_candle_and_order_book() -> None:
     "factory",
     [
         lambda: Candle.from_api(["1"]),
+        lambda: Candle.from_api(["1"] * 10),
         lambda: OrderBookLevel.from_api(["1", "2"]),
+        lambda: OrderBookLevel.from_api(["1"] * 5),
         lambda: OrderBook.from_api({"asks": [], "ts": "1"}),
         lambda: OrderBook.from_api({"asks": [], "bids": [], "ts": ""}),
     ],

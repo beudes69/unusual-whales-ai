@@ -116,8 +116,8 @@ class Candle(OkxModel):
     @classmethod
     def from_api(cls, row: list[object] | tuple[object, ...]) -> Candle:
         """Construit une bougie depuis le tableau positionnel d'OKX."""
-        if len(row) < 9:
-            raise ValueError("Une bougie OKX doit contenir au moins 9 valeurs.")
+        if len(row) != 9:
+            raise ValueError("Une bougie OKX doit contenir exactement 9 valeurs.")
         timestamp = _milliseconds_to_datetime(row[0])
         if timestamp is None:
             raise ValueError("Le timestamp de bougie est absent.")
@@ -168,8 +168,8 @@ class OrderBookLevel(OkxModel):
     @classmethod
     def from_api(cls, row: list[object] | tuple[object, ...]) -> OrderBookLevel:
         """Construit un niveau depuis le tableau positionnel d'OKX."""
-        if len(row) < 4:
-            raise ValueError("Un niveau de carnet OKX doit contenir 4 valeurs.")
+        if len(row) != 4:
+            raise ValueError("Un niveau de carnet OKX doit contenir exactement 4 valeurs.")
         return cls(
             price=Decimal(str(row[0])),
             size=Decimal(str(row[1])),

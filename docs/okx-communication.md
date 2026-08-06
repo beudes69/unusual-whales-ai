@@ -82,7 +82,8 @@ Toutes les erreurs réseau exposées dérivent de `OkxCommunicationError`.
 | `OkxSubscriptionError` | abonnement refusé par OKX |
 
 Le retry est limité aux erreurs transitoires. Une erreur de requête ou de
-parsing ne doit jamais être répétée automatiquement.
+parsing ne doit jamais être répétée automatiquement. Les codes OKX de timeout,
+d'indisponibilité et de système occupé sont classés transitoires.
 
 ## Tests
 

@@ -256,7 +256,7 @@ class RestClient:
             raise OkxRateLimitError(message)
         if code == "50004":
             raise OkxTimeoutError(message)
-        if code == "50001":
+        if code in {"50001", "50013"}:
             raise OkxApiUnavailableError(message)
         if code != "0":
             raise OkxApiError(message, code=code)
