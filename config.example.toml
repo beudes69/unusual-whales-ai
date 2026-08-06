@@ -19,4 +19,5 @@ backup_count = 5
 rest_base_url = "https://openapi.okx.com"
 websocket_public_url = "wss://ws.okx.com:8443/ws/v5/public"
 request_timeout_seconds = 10.0
-websocket_receive_timeout_seconds = 25.0
+websocket_receive_timeout_seconds = 20.0
+websocket_ack_timeout_seconds = 5.0

@@ -49,8 +49,11 @@ erreurs réseau et limitations sont réessayés.
 Le WebSocket possède une tâche de réception unique. Un silence déclenche le
 heartbeat texte `ping`/`pong` attendu par OKX. Une coupure ferme l'ancien
 transport, applique un backoff borné, recrée la connexion puis restaure chaque
-abonnement enregistré. Une trame invalide ou l'échec d'un callback est isolé
-sans arrêter la boucle.
+abonnement enregistré. Chaque commande porte un identifiant et un abonnement
+n'est actif qu'après acknowledgement. Les commandes dépassant la taille
+configurée sont refusées localement. Une trame invalide ou l'échec d'un
+callback est isolé sans arrêter la boucle ; une notice de maintenance provoque
+une reconnexion anticipée.
 
 Les URL, timeouts, quotas, délais et multiplicateurs sont configurés dans TOML.
 Les chemins d'API et noms de champs restent des contrats de protocole versionnés

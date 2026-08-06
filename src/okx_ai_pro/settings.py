@@ -133,6 +133,8 @@ class OkxSettings(_FrozenModel):
     websocket_close_timeout_seconds: PositiveFloat
     websocket_receive_timeout_seconds: PositiveFloat
     websocket_heartbeat_timeout_seconds: PositiveFloat
+    websocket_ack_timeout_seconds: PositiveFloat
+    websocket_max_command_bytes: PositiveInt
     subscription_limit: RateLimitSettings
     retry: RetrySettings
     reconnect: ReconnectSettings

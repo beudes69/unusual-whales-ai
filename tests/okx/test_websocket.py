@@ -11,6 +11,7 @@ import pytest
 
 from okx_ai_pro.okx.exceptions import (
     OkxNetworkError,
+    OkxSubscriptionError,
     OkxTimeoutError,
     OkxWebSocketClosedError,
     OkxWebSocketError,
@@ -32,6 +33,7 @@ class MockConnection:
         messages: list[str | bytes | BaseException] | None = None,
         *,
         send_error: BaseException | None = None,
+        auto_acknowledge: bool = True,
     ) -> None:
         self.incoming: asyncio.Queue[str | bytes | BaseException] = asyncio.Queue()
         for message in messages or []:
@@ -40,6 +42,7 @@ class MockConnection:
         self.sent_event = asyncio.Event()
         self.received_event = asyncio.Event()
         self.send_error = send_error
+        self.auto_acknowledge = auto_acknowledge
         self.closed = False
 
     async def send(self, message: str) -> None:
@@ -47,6 +50,18 @@ class MockConnection:
             raise self.send_error
         self.sent.append(message)
         self.sent_event.set()
+        if self.auto_acknowledge and message.startswith("{"):
+            command = json.loads(message)
+            self.incoming.put_nowait(
+                json.dumps(
+                    {
+                        "id": command["id"],
+                        "event": command["op"],
+                        "arg": command["args"][0],
+                        "connId": "test-connection",
+                    }
+                )
+            )
 
     async def recv(self, decode: bool | None = None) -> str | bytes:
         message = await self.incoming.get()
@@ -425,6 +440,150 @@ def test_transport_errors_are_always_normalized() -> None:
         WebSocketClient._translate_transport_error(ValueError()),
         OkxWebSocketError,
     )
+
+
+@pytest.mark.asyncio
+async def test_data_is_dispatched_only_after_subscription_acknowledgement(
+    okx_settings: OkxSettings,
+) -> None:
+    connection = MockConnection(auto_acknowledge=False)
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    subscription = WebSocketSubscription(
+        channel="tickers",
+        instrument_id="BTC-USDT-SWAP",
+    )
+    messages: list[WebSocketMessage] = []
+    delivered = asyncio.Event()
+
+    def callback(message: WebSocketMessage) -> None:
+        messages.append(message)
+        delivered.set()
+
+    await client.subscribe(subscription, callback)
+    await client.start()
+    command = json.loads(connection.sent[0])
+    push = json.dumps(
+        {
+            "arg": {"channel": "tickers", "instId": "BTC-USDT-SWAP"},
+            "data": [{"last": "100"}],
+        }
+    )
+    connection.incoming.put_nowait(push)
+    connection.incoming.put_nowait(
+        json.dumps(
+            {
+                "id": command["id"],
+                "event": "subscribe",
+                "arg": command["args"][0],
+            }
+        )
+    )
+    connection.incoming.put_nowait(push)
+
+    await asyncio.wait_for(delivered.wait(), 1)
+    await client.close()
+
+    assert len(messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_subscription_error_is_correlated_to_waiting_command(
+    okx_settings: OkxSettings,
+) -> None:
+    connection = MockConnection(auto_acknowledge=False)
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    subscription = WebSocketSubscription(
+        channel="invalid",
+        instrument_id="BTC-USDT-SWAP",
+    )
+
+    await client.start()
+    subscribing = asyncio.create_task(client.subscribe(subscription, lambda message: None))
+    await asyncio.wait_for(connection.sent_event.wait(), 1)
+    command = json.loads(connection.sent[0])
+    connection.incoming.put_nowait(
+        json.dumps(
+            {
+                "id": command["id"],
+                "event": "error",
+                "code": "60012",
+                "msg": "Invalid request",
+                "arg": command["args"][0],
+            }
+        )
+    )
+
+    with pytest.raises(OkxSubscriptionError, match="60012"):
+        await subscribing
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_subscription_ack_timeout_and_payload_limit_are_controlled(
+    okx_settings: OkxSettings,
+) -> None:
+    timeout_settings = _fast_settings(okx_settings).model_copy(
+        update={"websocket_ack_timeout_seconds": 0.005}
+    )
+    silent = MockConnection(auto_acknowledge=False)
+    timeout_client = WebSocketClient(
+        timeout_settings,
+        connector=SequenceConnector([silent]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    subscription = WebSocketSubscription(
+        channel="tickers",
+        instrument_id="BTC-USDT-SWAP",
+    )
+
+    await timeout_client.start()
+    with pytest.raises(OkxTimeoutError, match="Acknowledgement"):
+        await timeout_client.subscribe(subscription, lambda message: None)
+    await timeout_client.close()
+
+    size_settings = _fast_settings(okx_settings).model_copy(
+        update={"websocket_max_command_bytes": 10}
+    )
+    connection = MockConnection()
+    size_client = WebSocketClient(
+        size_settings,
+        connector=SequenceConnector([connection]),
+        subscription_limiter=NoOpLimiter(),
+    )
+    await size_client.start()
+    with pytest.raises(OkxSubscriptionError, match="taille maximale"):
+        await size_client.subscribe(subscription, lambda message: None)
+    await size_client.close()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_notice_triggers_reconnection(
+    okx_settings: OkxSettings,
+) -> None:
+    first = MockConnection([json.dumps({"event": "notice", "code": "64008", "msg": "maintenance"})])
+    second = MockConnection()
+    connector = SequenceConnector([first, second])
+    client = WebSocketClient(
+        _fast_settings(okx_settings),
+        connector=connector,
+        subscription_limiter=NoOpLimiter(),
+        sleep=_no_sleep,
+    )
+
+    await client.start()
+    await _wait_until(lambda: connector.calls >= 2)
+    await client.close()
+
+    assert first.closed
+    assert second.closed
 
 
 async def _no_sleep(delay: float) -> None:

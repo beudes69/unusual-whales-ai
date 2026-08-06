@@ -47,15 +47,20 @@ subscription = WebSocketSubscription(
 
 Il peut être enregistré avant ou après `OkxClient.start()`. Plusieurs callbacks
 et plusieurs abonnements peuvent coexister. Le premier callback déclenche
-`subscribe`; le dernier retrait déclenche `unsubscribe`.
+`subscribe`; le dernier retrait déclenche `unsubscribe`. Chaque commande reçoit
+un identifiant alphanumérique et l'état actif n'est modifié qu'après
+l'acknowledgement OKX correspondant.
 
 La boucle maintient les invariants suivants :
 
 - un seul lecteur appelle `recv()` ;
 - heartbeat texte après une période sans données ;
+- commandes bornées à la taille configurée ;
+- acknowledgements et erreurs corrélés par identifiant ;
 - fermeture contrôlée de l'ancienne connexion ;
 - backoff de reconnexion borné ;
 - restauration des abonnements après chaque reconnexion ;
+- reconnexion anticipée lors d'une notice de maintenance OKX ;
 - trames invalides et callbacks défaillants isolés ;
 - arrêt idempotent annulant toute reconnexion future.
 

@@ -7,7 +7,9 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import cast
+from dataclasses import dataclass
+from itertools import count
+from typing import Literal, cast
 
 from pydantic import ValidationError
 from websockets.asyncio.client import connect
@@ -36,6 +38,14 @@ from okx_ai_pro.okx.rate_limiter import RateLimiter
 from okx_ai_pro.settings import OkxSettings
 
 SleepCallable = Callable[[float], Awaitable[None]]
+Operation = Literal["subscribe", "unsubscribe"]
+
+
+@dataclass(slots=True)
+class _PendingOperation:
+    operation: Operation
+    subscription: WebSocketSubscription
+    future: asyncio.Future[None] | None
 
 
 async def default_websocket_connector(
@@ -77,6 +87,9 @@ class WebSocketClient:
         )
         self._sleep = sleep
         self._subscriptions: dict[WebSocketSubscription, list[MessageCallback]] = {}
+        self._active_subscriptions: set[WebSocketSubscription] = set()
+        self._pending_operations: dict[str, _PendingOperation] = {}
+        self._operation_ids = count(1)
         self._subscriptions_lock = asyncio.Lock()
         self._connection: WebSocketConnectionProtocol | None = None
         self._runner: asyncio.Task[None] | None = None
@@ -117,7 +130,16 @@ class WebSocketClient:
                 should_send = not callbacks
                 callbacks.append(callback)
         if should_send and self.is_connected:
-            await self._send_operation("subscribe", subscription)
+            try:
+                await self._send_operation("subscribe", subscription)
+            except OkxSubscriptionError:
+                async with self._subscriptions_lock:
+                    callbacks = self._subscriptions.get(subscription)
+                    if callbacks is not None and callback in callbacks:
+                        callbacks.remove(callback)
+                        if not callbacks:
+                            self._subscriptions.pop(subscription)
+                raise
 
     async def unsubscribe(
         self,
@@ -247,10 +269,25 @@ class WebSocketClient:
 
         event = payload.get("event")
         if event is not None:
+            operation_id = str(payload.get("id", ""))
+            if event in {"subscribe", "unsubscribe"}:
+                self._acknowledge_operation(operation_id)
+                return
             if event in {"error", "channel-conn-count-error"}:
                 code = str(payload.get("code", ""))
                 error_message = str(payload.get("msg", "Abonnement refusé par OKX."))
-                raise OkxSubscriptionError(f"{code} {error_message}".strip())
+                error = OkxSubscriptionError(f"{code} {error_message}".strip())
+                self._reject_operation(operation_id, error)
+                argument = payload.get("arg")
+                if isinstance(argument, dict):
+                    with suppress(ValidationError):
+                        self._active_subscriptions.discard(
+                            WebSocketSubscription.model_validate(argument)
+                        )
+                raise error
+            if event == "notice" and str(payload.get("code", "")) == "64008":
+                raise OkxWebSocketClosedError("Maintenance OKX annoncée ; reconnexion anticipée.")
+            self._logger.debug("Événement WebSocket OKX ignoré : %s", event)
             return
 
         argument = payload.get("arg")
@@ -271,6 +308,8 @@ class WebSocketClient:
             raise OkxInvalidDataError("Contrat WebSocket OKX invalide.") from exc
 
         async with self._subscriptions_lock:
+            if subscription not in self._active_subscriptions:
+                return
             callbacks = tuple(self._subscriptions.get(subscription, ()))
         for callback in callbacks:
             try:
@@ -287,28 +326,105 @@ class WebSocketClient:
         async with self._subscriptions_lock:
             subscriptions = tuple(self._subscriptions)
         for subscription in subscriptions:
-            await self._send_operation("subscribe", subscription)
+            await self._send_operation(
+                "subscribe",
+                subscription,
+                wait_for_acknowledgement=False,
+            )
 
-    async def _send_operation(self, operation: str, subscription: WebSocketSubscription) -> None:
+    async def _send_operation(
+        self,
+        operation: Operation,
+        subscription: WebSocketSubscription,
+        *,
+        wait_for_acknowledgement: bool = True,
+    ) -> None:
         connection = self._connection
         if connection is None:
             raise OkxWebSocketClosedError("WebSocket OKX non connecté.")
-        await self._subscription_limiter.acquire()
+        operation_id = f"{operation[0]}{next(self._operation_ids)}"
         payload = json.dumps(
             {
+                "id": operation_id,
                 "op": operation,
                 "args": [subscription.as_api_argument()],
             },
             separators=(",", ":"),
         )
+        if len(payload.encode("utf-8")) > self._settings.websocket_max_command_bytes:
+            raise OkxSubscriptionError(
+                "La commande WebSocket dépasse la taille maximale configurée."
+            )
+
+        await self._subscription_limiter.acquire()
+        future = asyncio.get_running_loop().create_future() if wait_for_acknowledgement else None
+        self._pending_operations[operation_id] = _PendingOperation(
+            operation=operation,
+            subscription=subscription,
+            future=future,
+        )
         try:
             await connection.send(payload)
         except (ConnectionClosed, OSError, WebSocketException) as exc:
+            self._pending_operations.pop(operation_id, None)
+            if future is not None:
+                future.cancel()
             raise OkxWebSocketClosedError(f"Impossible d'envoyer l'opération {operation}.") from exc
+
+        if future is None:
+            return
+        try:
+            async with asyncio.timeout(self._settings.websocket_ack_timeout_seconds):
+                await asyncio.shield(future)
+        except TimeoutError as exc:
+            self._pending_operations.pop(operation_id, None)
+            future.cancel()
+            raise OkxTimeoutError(f"Acknowledgement WebSocket absent pour {operation}.") from exc
+        except asyncio.CancelledError:
+            self._pending_operations.pop(operation_id, None)
+            future.cancel()
+            raise
+
+    def _acknowledge_operation(self, operation_id: str) -> None:
+        pending = self._pending_operations.pop(operation_id, None)
+        if pending is None:
+            self._logger.debug(
+                "Acknowledgement WebSocket sans commande en attente : %s",
+                operation_id,
+            )
+            return
+        if pending.operation == "subscribe":
+            self._active_subscriptions.add(pending.subscription)
+        else:
+            self._active_subscriptions.discard(pending.subscription)
+        if pending.future is not None and not pending.future.done():
+            pending.future.set_result(None)
+
+    def _reject_operation(
+        self,
+        operation_id: str,
+        error: OkxSubscriptionError,
+    ) -> None:
+        pending = self._pending_operations.pop(operation_id, None)
+        if pending is None:
+            return
+        self._active_subscriptions.discard(pending.subscription)
+        if pending.future is not None and not pending.future.done():
+            pending.future.set_exception(error)
+
+    def _fail_pending_operations(self) -> None:
+        for pending in self._pending_operations.values():
+            if pending.future is not None and not pending.future.done():
+                pending.future.set_exception(
+                    OkxWebSocketClosedError("Connexion fermée avant acknowledgement WebSocket.")
+                )
+        self._pending_operations.clear()
 
     async def _close_current_connection(self) -> None:
         connection = self._connection
         self._connection = None
+        self._active_subscriptions.clear()
+        self._fail_pending_operations()
         if connection is not None:
             with suppress(Exception):
                 await connection.close()

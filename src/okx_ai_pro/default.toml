@@ -19,8 +19,10 @@ user_agent = "OKX-AI-PRO/0.2.0"
 request_timeout_seconds = 10.0
 websocket_open_timeout_seconds = 10.0
 websocket_close_timeout_seconds = 10.0
-websocket_receive_timeout_seconds = 25.0
+websocket_receive_timeout_seconds = 20.0
 websocket_heartbeat_timeout_seconds = 5.0
+websocket_ack_timeout_seconds = 5.0
+websocket_max_command_bytes = 65536
 
 [okx.subscription_limit]
 max_requests = 480
