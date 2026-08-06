@@ -203,8 +203,12 @@ class WebSocketClient:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    error = self._translate_transport_error(exc)
-                    self._logger.warning("Connexion WebSocket OKX interrompue : %s", error)
+                    if not self._stopping.is_set():
+                        error = self._translate_transport_error(exc)
+                        self._logger.warning(
+                            "Connexion WebSocket OKX interrompue : %s",
+                            error,
+                        )
                 finally:
                     await self._close_current_connection()
 
