@@ -182,15 +182,8 @@ def record_identity(record: DataRecord) -> str:
     if isinstance(record, ContractMetadata):
         return f"contract:{record.instrument_id}:{record.observed_at.isoformat()}"
     if isinstance(record, CandleRecord):
-        return (
-            f"candle:{record.instrument_id}:{record.timeframe}:"
-            f"{record.timestamp.isoformat()}"
-        )
+        return f"candle:{record.instrument_id}:{record.timeframe}:{record.timestamp.isoformat()}"
     if isinstance(record, OrderBookSnapshot):
         return f"book:{record.instrument_id}:{record.sequence_id}"
-    identifier = (
-        record.index_id
-        if isinstance(record, IndexPriceSnapshot)
-        else record.instrument_id
-    )
+    identifier = record.index_id if isinstance(record, IndexPriceSnapshot) else record.instrument_id
     return f"{type(record).__name__}:{identifier}:{record.timestamp.isoformat()}"

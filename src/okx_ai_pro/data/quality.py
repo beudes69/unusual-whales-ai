@@ -15,7 +15,6 @@ from okx_ai_pro.data.models import (
     FundingRateSnapshot,
     OpenInterestSnapshot,
     OrderBookSnapshot,
-    TimestampedRecord,
     record_identity,
 )
 from okx_ai_pro.logging_config import get_logger
@@ -53,11 +52,7 @@ class DataQualityValidator:
     def inspect(self, record: DataRecord) -> tuple[DataAnomaly, ...]:
         identity = record_identity(record)
         anomalies: list[DataAnomaly] = []
-        timestamp = (
-            record.observed_at
-            if isinstance(record, ContractMetadata)
-            else record.timestamp
-        )
+        timestamp = record.observed_at if isinstance(record, ContractMetadata) else record.timestamp
         if timestamp < self._settings.minimum_timestamp or timestamp > (
             self._now() + timedelta(seconds=self._settings.maximum_future_seconds)
         ):

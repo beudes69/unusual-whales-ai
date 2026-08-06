@@ -38,6 +38,24 @@ def _ticker(*, timestamp: datetime = NOW) -> TickerSnapshot:
     )
 
 
+def _candle(*, complete: bool) -> CandleRecord:
+    return CandleRecord(
+        instrument_id="BTC-USDT-SWAP",
+        timeframe="1m",
+        open=Decimal("100"),
+        high=Decimal("110"),
+        low=Decimal("90"),
+        close=Decimal("105"),
+        volume_contracts=Decimal("10"),
+        volume_currency=Decimal("1"),
+        volume_quote=Decimal("1000"),
+        complete=complete,
+        timestamp=NOW,
+        received_at=NOW,
+        source=DataSource.WEBSOCKET,
+    )
+
+
 def _quality_gate() -> DataQualityGate:
     cache: MemoryCache[str, DataRecord] = MemoryCache(
         CacheSettings(
@@ -68,22 +86,8 @@ async def test_quality_gate_accepts_valid_data_and_rejects_duplicate() -> None:
 @pytest.mark.asyncio
 async def test_incomplete_candle_can_be_replaced_by_completed_version() -> None:
     gate = _quality_gate()
-    values = {
-        "instrument_id": "BTC-USDT-SWAP",
-        "timeframe": "1m",
-        "open": Decimal("100"),
-        "high": Decimal("110"),
-        "low": Decimal("90"),
-        "close": Decimal("105"),
-        "volume_contracts": Decimal("10"),
-        "volume_currency": Decimal("1"),
-        "volume_quote": Decimal("1000"),
-        "timestamp": NOW,
-        "received_at": NOW,
-        "source": DataSource.WEBSOCKET,
-    }
-    incomplete = CandleRecord(**values, complete=False)
-    complete = CandleRecord(**values, complete=True)
+    incomplete = _candle(complete=False)
+    complete = _candle(complete=True)
 
     assert await gate.accept(incomplete)
     assert await gate.accept(complete)
@@ -167,7 +171,7 @@ def test_validator_detects_incoherent_funding_schedule() -> None:
 
 def test_models_reject_naive_dates_and_incoherent_numeric_values() -> None:
     with pytest.raises(ValidationError, match="fuseau"):
-        _ticker(timestamp=datetime(2026, 8, 5, 12))
+        _ticker(timestamp=datetime(2026, 8, 5, 12))  # noqa: DTZ001
     with pytest.raises(ValidationError, match="plus haut"):
         CandleRecord(
             instrument_id="BTC-USDT-SWAP",

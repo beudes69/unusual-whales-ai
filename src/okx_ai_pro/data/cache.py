@@ -6,6 +6,7 @@ import asyncio
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Generic, Protocol, TypeVar
 
@@ -67,10 +68,8 @@ class MemoryCache(Generic[K, V]):
         self._purger = None
         if purger is not None:
             purger.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await purger
-            except asyncio.CancelledError:
-                pass
 
     async def get(self, key: K) -> V | None:
         """Retourne une valeur valide et actualise sa récence LRU."""
@@ -132,11 +131,7 @@ class MemoryCache(Generic[K, V]):
         """Supprime les entrées expirées et retourne leur nombre."""
         async with self._lock:
             now = self._clock.now()
-            expired = [
-                key
-                for key, entry in self._entries.items()
-                if entry.expires_at <= now
-            ]
+            expired = [key for key, entry in self._entries.items() if entry.expires_at <= now]
             for key in expired:
                 self._entries.pop(key)
             return len(expired)
